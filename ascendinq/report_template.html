@@ -72,6 +72,24 @@ a.chip:hover{border-color:var(--gold)}
 .trip{display:flex;gap:8px;align-items:center;margin:4px 0}
 .items{display:flex;flex-wrap:wrap;gap:8px}
 .note{color:var(--muted);font-size:12px;margin-top:20px}
+.teams{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.teams h3{margin:0 0 8px;font-size:14px}.teams h3.ally{color:var(--blue)}.teams h3.enemy{color:var(--red)}
+.pl{display:grid;grid-template-columns:44px 36px 1fr;gap:10px;align-items:center;background:var(--panel2);border-radius:8px;
+  padding:8px 10px;margin-bottom:6px;border:1px solid transparent}
+.pl.me{border-color:var(--gold)}
+.grade{width:44px;height:44px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:900}
+.g-S{background:rgba(255,209,102,.18);color:#ffd166}.g-A{background:rgba(67,197,158,.16);color:var(--green)}
+.g-B{background:rgba(79,163,255,.16);color:var(--blue)}.g-C{background:rgba(139,149,161,.16);color:#c9cfd6}
+.g-D{background:rgba(255,159,67,.16);color:var(--orange)}.g-F{background:rgba(255,93,93,.2);color:var(--red)}
+.pl img{width:36px;height:36px;border-radius:8px}
+.pl .nm{font-weight:bold}.pl .nm small{color:var(--muted);font-weight:normal;margin-left:6px}
+.pl .ln{font-size:12px;color:#c9cfd6}.pl .ln .pos{color:var(--green)}.pl .ln .neg{color:var(--red)}
+.flag{display:inline-block;background:rgba(255,93,93,.15);color:var(--red);border-radius:10px;padding:0 8px;font-size:11px;margin-left:4px}
+.tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+.tag{border:1px solid;border-radius:6px;padding:0 8px;font-size:12px;line-height:20px}
+.tag.good{color:var(--green);border-color:rgba(67,197,158,.6);background:rgba(67,197,158,.08)}
+.tag.bad{color:var(--red);border-color:rgba(255,93,93,.55);background:rgba(255,93,93,.08)}
+@media (max-width:820px){.teams{grid-template-columns:1fr}}
 @media (max-width:820px){.grid{grid-template-columns:1fr}.deaths-wrap{grid-template-columns:1fr}}
 </style>
 </head>
@@ -240,6 +258,25 @@ function roams() {
   return parts.length ? `<div class="card">${parts.join("")}</div>` : "";
 }
 
+function teams() {
+  const ps = A.players || [];
+  if (!ps.length) return "";
+  const row = p => `<div class="pl${p.pid === A.me.pid ? " me" : ""}">
+      <div class="grade g-${p.grade}" title="${p.score}点">${p.grade}</div>
+      <img src="${icon(p.champ)}" alt="" onerror="this.style.visibility='hidden'">
+      <div><div class="nm">${esc(p.champ_ja)}<small>${p.role} ・ ${esc(p.name)}${p.pid === A.me.pid ? "（自分）" : ""}</small></div>
+        <div class="ln">${p.kda} ・ キル関与 ${p.kp}% ・ ${p.role === "SUP" ? `視界 ${p.vision_min}/分` : `ダメージ ${p.dmg_share}%`}
+          ${p.lane_diff != null ? ` ・ 対面差 <span class="${p.lane_diff >= 0 ? "pos" : "neg"}">${signed(p.lane_diff)}G</span>` : ""}
+          ${p.ganks != null ? ` ・ ガンク(15分まで) ${p.ganks}回 ・ オブジェクト ${p.objectives}` : ""}
+          ${p.solo_kills ? ` ・ ソロキル ${p.solo_kills}` : ""}</div>
+        ${(p.tags || []).length ? `<div class="tags">${p.tags.map(t => `<span class="tag ${t.good ? "good" : "bad"}">${esc(t.text)}</span>`).join("")}</div>`
+          : (p.good ? `<div class="ln"><span class="pos">◎ ${esc(p.good)}</span></div>` : "")}</div></div>`;
+  const ally = ps.filter(p => p.team === A.me.team), enemy = ps.filter(p => p.team !== A.me.team);
+  return `<div class="card full"><h2>チーム評価 <span class="n">S / A / B / C / D / F の6段階（KDA・キル関与・ダメージ割合・対面とのゴールド差・デス・CS、JGはガンクとオブジェクトも）</span></h2>
+    <div class="teams"><div><h3 class="ally">味方${A.win ? "（勝ち）" : "（負け）"}</h3>${ally.map(row).join("")}</div>
+      <div><h3 class="enemy">敵</h3>${enemy.map(row).join("")}</div></div></div>`;
+}
+
 function items() {
   const it = A.items || [];
   if (!it.length) return "";
@@ -249,7 +286,7 @@ function items() {
 }
 
 document.title = `${A.me.champ_ja} ${A.remake ? "リメイク" : A.win ? "勝ち" : "負け"} | Ascend InQ`;
-document.getElementById("app").innerHTML = header() + `<div class="grid">${issues()}${goods()}${deaths()}${lane()}${roams()}${items()}</div>
+document.getElementById("app").innerHTML = header() + `<div class="grid">${issues()}${goods()}${teams()}${deaths()}${lane()}${roams()}${items()}</div>
   <div class="note">位置は1分ごとのデータからの推定です。体力・ゴールドは録画した試合だけ表示されます。</div>`;
 </script>
 </body>

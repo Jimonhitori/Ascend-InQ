@@ -415,6 +415,8 @@ def analyze(match: dict, timeline: dict, puuid: str, live: dict | None = None) -
         d["cause"] = death_rules.classify(d, me["role"], ejg["champ_ja"] if ejg else None)
     a["rules_version"] = death_rules.RULES_VERSION
     a["has_live"] = bool(live.get("me"))
+    from .teamrate import rate_players
+    a["players"] = rate_players(match, timeline, duration)
     a["issues"], a["good"] = find_issues(a)
     a["focus"] = a["issues"][0]["focus"] if a["issues"] else "今の動きを続けつつ、CSを1分あたり+0.5伸ばすことを意識する。"
     return a
