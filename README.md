@@ -11,31 +11,42 @@
 
 > 試合中に動くのは「録画」と「試合が終わったかの確認（数秒に1回、自分のPC内への小さな問い合わせ）」だけです。分析は試合後に行います。
 
+## 使い方（アプリ）
+1. ffmpeg を入れる（初回だけ。コマンドプロンプトで `winget install Gyan.FFmpeg`）
+2. `AscendInQ.exe` を起動 → 画面右下のタスクトレイに金色の「⏫」アイコンが出ます
+3. 初回はメモ帳で設定が開くので、Riot APIキー（https://developer.riotgames.com で発行）と自分の Riot ID（例: `Name#JP1`）を書いて保存
+4. あとは LoL をプレイするだけ。試合が始まると自動で録画（アイコンに赤丸）、終わると分析してビューアが開きます
+5. LoL をやめるときは、トレイアイコンを右クリック →「終了」
+
+トレイアイコンの右クリックメニュー:
+- **最新の試合を見る**（アイコンのダブルクリックでも開きます） / **試合一覧を開く**
+- **直近の試合を取り込む** … 録画していない過去の試合もミニマップ再生と解説で見られます
+- **自動録画** のオン/オフ、**試合後にビューアを開く** のオン/オフ
+- 録画フォルダ・設定・ログを開く
+
+> 開発用APIキーは24時間で失効します。失効したら再発行して、メニューの「設定」から貼り直してください。
+> Outplayed / OBS など他の録画ソフトは止めておいてください（二重録画になります）。
+
+録画・データ・レポートはすべて `AscendInQ.exe` と同じフォルダに保存されます（フォルダごと移動・削除できます）。
+
 ## 必要なもの
 - Windows 10/11
-- Python 3.10 以上
-- ffmpeg（`winget install Gyan.FFmpeg` で入ります）
+- ffmpeg（`winget install Gyan.FFmpeg`）
 - 録画する場合: NVIDIA / AMD / Intel のGPU（ハードウェアエンコーダー）
-- Riot API キー（https://developer.riotgames.com でログインして発行）
+- Riot API キー
 
-## セットアップ
+## ソースから使う / ビルドする
 ```
 git clone https://github.com/Jimonhitori/Ascend-InQ.git
 cd Ascend-InQ
 pip install -r requirements.txt
-copy .env.example .env
-notepad .env
+pythonw app.py          # トレイアプリとして起動
+build.bat               # dist\AscendInQ\AscendInQ.exe を作る
 ```
-`.env` に `RIOT_API_KEY` と自分の `RIOT_ID`（例: `Name#JP1`）を書きます。
-開発用キーは24時間で失効するので、失効したら再発行して貼り直してください。
+Python 3.10 以上が必要です。
 
-## 使い方
-### いちばん簡単: 自動録画＋自動振り返り
-`start_recorder.bat` をダブルクリックして、そのまま LoL をプレイ。
-試合が始まると録画が始まり、終わるとAPIから試合データを取ってビューアが開きます。
-（Outplayed / OBS など他の録画ソフトは止めておいてください）
-
-### コマンド
+### コマンド版（CLI）
+`.env.example` を `.env` にコピーして設定してから:
 ```
 python review.py record --open        # 自動録画（常駐）。試合後にビューアを開く
 python review.py                      # 直近5試合を取得してレポート/ビューア作成

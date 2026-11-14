@@ -22,8 +22,9 @@ from . import config
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 LIVE = "https://127.0.0.1:2999/liveclientdata"
-REC_DIR = config.ROOT / "recordings"
+REC_DIR = config.REC_DIR
 BELOW_NORMAL = 0x00004000
+NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0  # no console flash from the tray app
 MAX_MINUTES = 90
 
 
@@ -46,7 +47,8 @@ def player_name():
 
 
 def pick_encoder(exe):
-    out = subprocess.run([exe, "-hide_banner", "-encoders"], capture_output=True, text=True).stdout
+    out = subprocess.run([exe, "-hide_banner", "-encoders"], capture_output=True, text=True,
+                         creationflags=NO_WINDOW).stdout
     for enc in ("h264_nvenc", "h264_amf", "h264_qsv"):
         if enc in out:
             return enc
@@ -77,7 +79,7 @@ class Recording:
                "-movflags", "+frag_keyframe+empty_moov",  # stays playable even if the PC crashes
                str(self.tmp)]
         self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE,
-                                     creationflags=BELOW_NORMAL if sys.platform == "win32" else 0)
+                                     creationflags=(BELOW_NORMAL | NO_WINDOW) if sys.platform == "win32" else 0)
         self.offset = None
 
     def sync(self):
@@ -102,7 +104,8 @@ class Recording:
         # remux to a normal mp4 (fast, no re-encode) so browsers seek smoothly
         exe = shutil.which("ffmpeg")
         r = subprocess.run([exe, "-hide_banner", "-loglevel", "error", "-y", "-i", str(self.tmp),
-                            "-c", "copy", "-movflags", "+faststart", str(self.path)], capture_output=True)
+                            "-c", "copy", "-movflags", "+faststart", str(self.path)], capture_output=True,
+                           creationflags=NO_WINDOW)
         if r.returncode == 0:
             self.tmp.unlink(missing_ok=True)
         else:
@@ -124,31 +127,51 @@ def cleanup(keep: int):
         print(f"  古い録画を削除: {old.name}")
 
 
-def run(after_game=None, poll=4):
-    """Main loop. after_game(video_path, info) is called after each recorded game."""
+def check_ready():
+    """Return (ffmpeg_path, encoder) or raise RuntimeError with a user-facing message."""
     exe = shutil.which("ffmpeg")
     if not exe:
-        raise RuntimeError("ffmpeg が見つかりません。")
+        raise RuntimeError("ffmpeg が見つかりません。コマンドプロンプトで「winget install Gyan.FFmpeg」を実行してから、アプリを起動し直してください。")
     enc = pick_encoder(exe)
     if not enc:
         raise RuntimeError("GPUエンコーダー（NVENC/AMF/QSV）が使えないため、軽量録画ができません。")
+    return exe, enc
+
+
+def run(after_game=None, poll=4, stop=None, enabled=lambda: True, log=print, on_state=lambda s: None):
+    """Main loop. after_game(video_path, info) is called after each recorded game.
+
+    stop: threading.Event to end the loop (an ongoing recording is finalized cleanly).
+    enabled: callable; when it returns False no new recording starts.
+    on_state: called with "waiting" / "recording" / "processing" / "paused".
+    """
+    import threading
+    stop = stop or threading.Event()
+    exe, enc = check_ready()
     keep = int(os.getenv("RECORD_KEEP", "30"))
-    print(f"Ascend InQ: 録画待機中（{enc}）。LoLの試合が始まると自動で録画します。止めるには Ctrl+C。")
-    while True:
+    log(f"録画待機中（{enc}）。LoLの試合が始まると自動で録画します。")
+    on_state("waiting")
+    while not stop.is_set():
+        if not enabled():
+            on_state("paused")
+            stop.wait(poll)
+            continue
         if game_time() is None:
-            time.sleep(poll)
+            on_state("waiting")
+            stop.wait(poll)
             continue
         name = player_name()
         if not name:  # spectating / replay
-            time.sleep(15)
+            stop.wait(15)
             continue
         rec = Recording(exe, enc)
-        time.sleep(1.5)
+        stop.wait(1.5)
         rec.sync()
-        print(f"[{dt.datetime.now():%H:%M}] 試合を検知 → 録画開始（{name}） {rec.path.name}")
+        on_state("recording")
+        log(f"[{dt.datetime.now():%H:%M}] 試合を検知 → 録画開始（{name}） {rec.path.name}")
         misses = 0
-        while rec.alive() and time.time() - rec.start < MAX_MINUTES * 60:
-            time.sleep(5)
+        while rec.alive() and time.time() - rec.start < MAX_MINUTES * 60 and not stop.is_set():
+            stop.wait(5)
             if game_time() is None:
                 misses += 1
                 if misses >= 3:
@@ -157,17 +180,19 @@ def run(after_game=None, poll=4):
                 misses = 0
                 if rec.offset is None:
                     rec.sync()
+        on_state("processing")
         path, err = rec.stop()
         if not path:
-            print(f"  録画に失敗しました: {err[:300]}")
+            log(f"録画に失敗しました: {err[:300]}")
             continue
         info = {"start_epoch": rec.start, "offset": rec.offset, "player": name}
         sidecar(path).write_text(json.dumps(info, ensure_ascii=False), encoding="utf-8")
         size = path.stat().st_size / 1e9
-        print(f"[{dt.datetime.now():%H:%M}] 録画終了: {path.name}（{size:.1f} GB）")
+        log(f"[{dt.datetime.now():%H:%M}] 録画終了: {path.name}（{size:.1f} GB）")
         cleanup(keep)
-        if after_game:
+        if after_game and not stop.is_set():
             try:
                 after_game(path, info)
             except Exception as e:  # keep recording future games whatever happens
-                print(f"  試合後の処理でエラー: {e}")
+                log(f"試合後の処理でエラー: {e}")
+    on_state("stopped")

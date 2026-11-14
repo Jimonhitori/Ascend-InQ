@@ -8,42 +8,19 @@
   python review.py clip [match_id|latest] [--video 録画ファイル] [--offset 秒]
 """
 import argparse
-import json
+import os
 import sys
-import time
 from pathlib import Path
 
-import os
-
-from ascendinq import analyze, clips, config, fetch, report, viewer
-from ascendinq.riot import RiotAPIError, RiotClient
+from ascendinq import clips, config, fetch, pipeline, report
+from ascendinq.riot import RiotAPIError
 
 
-def puuid_for(riot_id):
-    cache = config.DATA_DIR / "accounts.json"
-    if cache.exists():
-        data = json.loads(cache.read_text(encoding="utf-8"))
-        if riot_id in data:
-            return data[riot_id]
-    client = RiotClient(config.api_key(), config.region(), config.platform())
-    return fetch.get_puuid(client, riot_id)
-
-
-def build(match_id, puuid, video=None, offset=None):
-    m, t = fetch.load_match(match_id)
-    a = analyze.analyze(m, t, puuid)
-    if video is None:
-        video = clips.find_video(a["game_start_ms"])
-    viewer.build(a, m, t, video, offset)
-    return a, report.write(a)
-
-
-def viewer_path(match_id):
-    return config.REPORT_DIR / f"{match_id}_viewer.html"
+puuid_for, build, viewer_path = pipeline.puuid_for, pipeline.build, pipeline.viewer_path
 
 
 def cmd_fetch(args):
-    client = RiotClient(config.api_key(), config.region(), config.platform())
+    client = pipeline.client()
     print(f"{args.id} の直近{args.n}試合（ソロランク）を確認中…")
     puuid, ids, new = fetch.fetch_recent(client, args.id, args.n)
     if not ids:
@@ -87,24 +64,12 @@ def cmd_record(args):
     from ascendinq import recorder
 
     def after_game(video, info):
-        riot_id = info["player"] if "#" in (info["player"] or "") else args.id
-        client = RiotClient(config.api_key(), config.region(), config.platform())
-        print(f"  {riot_id} の試合データがAPIに出るのを待っています…")
-        for attempt in range(12):
-            time.sleep(30 if attempt == 0 else 60)
-            puuid, ids, _ = fetch.fetch_recent(client, riot_id, 1)
-            if not ids:
-                continue
-            m, _ = fetch.load_match(ids[0])
-            start = m["info"].get("gameStartTimestamp", 0) / 1000
-            if abs(start - info["start_epoch"]) < 600:
-                a, _ = build(ids[0], puuid, video)
-                print(f"  次の試合で意識すること: {a['focus']}")
-                print(f"  ビューア: {viewer_path(ids[0])}")
-                if args.open:
-                    os.startfile(viewer_path(ids[0]))
-                return
-        print("  ソロランクの試合が見つかりませんでした（ノーマル等の試合は録画だけ残します）。")
+        a, path = pipeline.review_after_game(video, info, args.id)
+        if a:
+            print(f"  次の試合で意識すること: {a['focus']}")
+            print(f"  ビューア: {path}")
+            if args.open:
+                os.startfile(path)
 
     recorder.run(None if args.no_review else after_game)
 

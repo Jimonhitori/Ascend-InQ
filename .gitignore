@@ -9,3 +9,8 @@ recordings/
 CLAUDE.local.md
 .claude/
 *.part.mp4
+build/
+dist/
+build_assets/
+*.spec
+logs/

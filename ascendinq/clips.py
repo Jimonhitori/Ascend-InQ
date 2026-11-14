@@ -80,7 +80,7 @@ def _ffmpeg(args):
     exe = shutil.which("ffmpeg")
     if not exe:
         raise RuntimeError("ffmpeg が見つかりません。インストールして PATH を通してください。")
-    flags = 0x00004000 if sys.platform == "win32" else 0  # BELOW_NORMAL_PRIORITY_CLASS
+    flags = 0x00004000 | 0x08000000 if sys.platform == "win32" else 0  # below-normal priority, no console window
     r = subprocess.run([exe, "-hide_banner", "-loglevel", "error", "-y", *args],
                        capture_output=True, text=True, creationflags=flags)
     return r.returncode == 0, r.stderr.strip()
