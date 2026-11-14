@@ -77,6 +77,12 @@ def cmd_record(args):
     recorder.run(None if args.no_review else after_game)
 
 
+def cmd_feedback(args):
+    from ascendinq import feedback
+    files = args.files or feedback.default_files()
+    print(feedback.report(files))
+
+
 def cmd_clip(args):
     puuid = puuid_for(args.id)
     ids = fetch.cached_match_ids()
@@ -110,16 +116,18 @@ def main():
     rc = sub.add_parser("record", parents=[common], help="試合を自動で録画（常駐）")
     rc.add_argument("--open", action="store_true", help="試合後にビューアを自動で開く")
     rc.add_argument("--no-review", action="store_true", help="録画だけして、試合データの取得はしない")
+    fb = sub.add_parser("feedback", help="ビューアで付けた「合ってる/違う」をルールごとに集計")
+    fb.add_argument("files", nargs="*", type=Path, help="評価ファイル（省略時はダウンロードフォルダから探す）")
     c = sub.add_parser("clip", parents=[common], help="録画からデス場面を切り出す")
     c.add_argument("match_id", nargs="?", default="latest")
     c.add_argument("--video", type=Path)
     c.add_argument("--offset", type=float, help="ゲーム内0:00が動画の何秒目か（自動推定がずれる時に指定）")
     argv = sys.argv[1:]
-    if not argv or argv[0] not in ("fetch", "report", "clip", "view", "record", "-h", "--help"):
+    if not argv or argv[0] not in ("fetch", "report", "clip", "view", "record", "feedback", "-h", "--help"):
         argv = ["fetch", *argv]
     args = ap.parse_args(argv)
     try:
-        {"fetch": cmd_fetch, "report": cmd_report, "clip": cmd_clip, "view": cmd_view, "record": cmd_record}[args.cmd](args)
+        {"fetch": cmd_fetch, "report": cmd_report, "clip": cmd_clip, "view": cmd_view, "record": cmd_record, "feedback": cmd_feedback}[args.cmd](args)
     except (config.ConfigError, RiotAPIError, ClientNotRunning, FileNotFoundError, ValueError, RuntimeError) as e:
         sys.exit(f"エラー: {e}")
     except KeyboardInterrupt:

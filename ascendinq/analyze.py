@@ -153,7 +153,21 @@ def pinfo(p):
 
 # ---------------------------------------------------------------- main
 
-def analyze(match: dict, timeline: dict, puuid: str) -> dict:
+def _sample_before(samples, t_sec, gap):
+    """Latest live sample taken at least `gap` seconds before t_sec."""
+    best = None
+    for s in samples or []:
+        if s[0] <= t_sec - gap:
+            best = s
+        else:
+            break
+    return best
+
+
+def analyze(match: dict, timeline: dict, puuid: str, live: dict | None = None) -> dict:
+    """live: optional data captured during the recording (see recorder): my HP/gold samples, players alive."""
+    from . import deaths as death_rules
+    live = live or {}
     info = match["info"]
     parts = info["participants"]
     me_p = next((p for p in parts if p["puuid"] == puuid), None)
@@ -242,7 +256,27 @@ def analyze(match: dict, timeline: dict, puuid: str) -> dict:
                 o["my_dead"] = True
         frames = timeline["info"]["frames"]
         pf = frames[min(int(t // 60000), len(frames) - 1)]["participantFrames"]
+        me_s = _sample_before(live.get("me"), t / 1000, 8)      # [gt, hp_frac, gold, level]
+        gold_s = _sample_before(live.get("me"), t / 1000, 1)
+        pl_s = _sample_before(live.get("players"), t / 1000, 3)  # [gt, {name: [team, dead, level]}]
+        enemies_alive = (sum(1 for team, dead, _ in pl_s[1].values() if team != my_team and not dead)
+                         if pl_s else None)
+        kills_near = [k for k in events if k["type"] == "CHAMPION_KILL" and k is not e
+                       and t - 15000 <= k["timestamp"] <= t + 10000 and k.get("victimId") in by_id]
+        fight = {
+            "allies_dead_before": sum(1 for k in kills_near if k["timestamp"] <= t
+                                      and by_id[k["victimId"]]["team"] == my_team),
+            "enemies_dead": sum(1 for k in kills_near if by_id[k["victimId"]]["team"] != my_team),
+            "first": not any(k["timestamp"] <= t for k in kills_near),
+        }
+        kf = pf.get(str(killer), {}) if killer in by_id else {}
         deaths.append({
+            "fight": fight,
+            "killer_level": kf.get("level"),
+            "killer_gold_diff": pf[str(my_id)]["totalGold"] - kf["totalGold"] if kf.get("totalGold") is not None else None,
+            "hp_before": me_s[1] if me_s and me_s[0] >= t / 1000 - 20 else None,
+            "gold_unspent": gold_s[2] if gold_s and gold_s[0] >= t / 1000 - 10 else None,
+            "enemies_alive": enemies_alive,
             "t": t / 1000,
             "pos": dpos,
             "killer_pid": killer,
@@ -367,6 +401,10 @@ def analyze(match: dict, timeline: dict, puuid: str) -> dict:
         a["issues"], a["good"] = [], []
         a["focus"] = "リメイクの試合なので分析していません。"
         return a
+    for d in a["deaths"]:
+        d["cause"] = death_rules.classify(d, me["role"], ejg["champ_ja"] if ejg else None)
+    a["rules_version"] = death_rules.RULES_VERSION
+    a["has_live"] = bool(live.get("me"))
     a["issues"], a["good"] = find_issues(a)
     a["focus"] = a["issues"][0]["focus"] if a["issues"] else "今の動きを続けつつ、CSを1分あたり+0.5伸ばすことを意識する。"
     return a
@@ -402,43 +440,9 @@ def find_issues(a):
 
     ts = lambda ds: "、".join(mmss(d["t"]) for d in ds)
 
-    # 1. early ganks
-    gank = [d for d in deaths if d["t"] < 15 * 60 and d["jg_involved"]]
-    if gank:
-        pushed = [d for d in gank if "敵側" in d["zone"] or "敵陣" in d["zone"]]
-        detail = f"{ts(gank)} に敵JG（{a['enemy_jg']['champ_ja'] if a['enemy_jg'] else '?'}）絡みで倒された"
-        detail += f"（場所: {'、'.join(d['zone'] for d in gank)}）。"
-        if role == "JUNGLE":
-            add(3 * len(gank) + len(pushed), "序盤に敵JGとの戦いで倒されている", detail,
-                "敵JGの初手ルートからいまの位置を予想し、相手の方がレベル・体力で有利な時は競らずに反対側を狩る。")
-        else:
-            if pushed:
-                detail += f" うち{len(pushed)}回は敵側に押し込んだ位置だった。"
-            add(3 * len(gank) + len(pushed), "序盤の敵JGのガンクで倒されている", detail,
-                "敵JGを最後に見てから45秒以上たったら、ウェーブを押し切らずに自陣側で待つ。")
-
-    # 2. 1v1 losses to lane opponent
-    solo = [d for d in deaths if d["n_enemies"] == 1 and d["killer_is_opp"]]
-    if solo:
-        add(2.5 * len(solo), "対面との1v1で倒されている",
-            f"{ts(solo)} に {a['opp']['champ_ja']} 単独に倒された（レベル/スキル差・体力差の判断ミスの可能性）。",
-            "仕掛ける前に「相手のレベル・主要スキルのCD・自分の体力」を確認し、勝てる根拠がある時だけトレードする。")
-
-    # 3. deaths in unwarded dangerous areas
-    blind = [d for d in deaths if d["my_wards_3min"] == 0 and not d["allies_near"]
-             and any(k in d["zone"] for k in ("リバー", "敵陣ジャングル", "敵側"))]
-    if blind:
-        add(2 * len(blind), "視界なし・味方なしで危険地帯に入って倒されている",
-            f"{ts(blind)}：直前3分に自分のワード設置0、近くに味方なし（{'、'.join(sorted({d['zone'] for d in blind}))}）。",
-            "リバーや敵陣に入る前に、ワードかスイーパーを1つ使ってから動く。")
-
-    # 4. deaths that gave away objectives
-    obj_deaths = [d for d in deaths if d["lost_after"]]
-    if obj_deaths:
-        lost = "、".join(f"{mmss(d['t'])}→{'/'.join(d['lost_after'])}" for d in obj_deaths)
-        add(3 * len(obj_deaths), "デスの直後にオブジェクトを取られている",
-            f"デス→直後に失ったオブジェクト: {lost}",
-            "オブジェクト湧きの1分前からは無理なトレードや単独行動をしない。生きていること自体がオブジェクトの準備。")
+    # 1-4. deaths, grouped by classified cause (see deaths.py)
+    from . import deaths as death_rules
+    issues.extend(death_rules.group_issues(deaths))
 
     # 5. enemy objectives while I was alive but far away
     duty = OBJ_DUTY.get(role, OBJ_DUTY["MIDDLE"])
@@ -450,13 +454,6 @@ def find_issues(a):
             "、".join(f"{mmss(o['t'])} {o['name']}（距離{o['my_dist']}, 30秒前の自分: {o['my_zone_before']}）"
                      for o in missed),
             OBJ_FOCUS.get(role, OBJ_FOCUS["MIDDLE"]))
-
-    # 6. isolated late deaths
-    late_iso = [d for d in deaths if d["t"] >= 20 * 60 and not d["allies_near"] and d["n_enemies"] >= 2]
-    if late_iso:
-        add(2 * len(late_iso), "中盤以降、味方から離れた位置で捕まっている",
-            f"{ts(late_iso)}：近くに味方なし・{'/'.join(str(d['n_enemies']) for d in late_iso)}人に倒された。",
-            "20分以降はマップに映っていない敵の人数を数え、3人以上見えていない時はサイドに単独で行かない。")
 
     # 7. lane CS / gold
     l10 = next((r for r in a["lane"] if r["min"] == 10), None)

@@ -89,6 +89,9 @@ header a{color:var(--blue);text-decoration:none}
 .card .adv li{padding:4px 0 4px 26px;position:relative;line-height:1.5}
 .card .adv li::before{content:"💡";position:absolute;left:0}
 .card .nav{margin-left:auto;display:flex;gap:6px}
+.fb{display:flex;align-items:center;gap:8px;margin-top:10px;color:var(--muted);font-size:12px}
+.fb button.ok.on{background:var(--green);border-color:var(--green);color:#111}
+.fb button.ng.on{background:var(--red);border-color:var(--red);color:#111}
 .hint{color:var(--muted);font-size:12px}
 @media (max-width:900px){.main{grid-template-columns:1fr}.side{display:none}}
 </style>
@@ -102,6 +105,7 @@ header a{color:var(--blue);text-decoration:none}
     <span class="meta" id="meta"></span>
     <span class="sp"></span>
     <label><button id="openVideo">🎬 録画を開く</button><input type="file" id="file" accept="video/*" hidden></label>
+    <button id="exportFb" title="「合ってる/違う」の評価をファイルに保存（ルール改善用）">評価を書き出す</button>
     <a id="reportLink" href="#">詳細レポート</a>
     <a href="index.html">試合一覧</a>
   </header>
@@ -325,7 +329,11 @@ function renderCard() {
       <div class="nav"><button id="prevM">◀ 前</button><button id="replay">↺ ${fmt(m.jump)}から見る</button><button id="nextM">次 ▶</button></div>
     </div>
     ${m.facts.length ? `<div class="facts">${m.facts.map(f => `<span>${esc(f)}</span>`).join("")}</div>` : ""}
-    ${m.advice.length ? `<ul class="adv">${m.advice.map(a => `<li>${esc(a)}</li>`).join("")}</ul>` : ""}`;
+    ${m.advice.length ? `<ul class="adv">${m.advice.map(a => `<li>${esc(a)}</li>`).join("")}</ul>` : ""}
+    ${m.advice.length ? `<div class="fb">この解説は
+      <button class="ok${fbGet(i) === "ok" ? " on" : ""}" data-v="ok">👍 合ってる</button>
+      <button class="ng${fbGet(i) === "ng" ? " on" : ""}" data-v="ng">👎 違う</button></div>` : ""}`;
+  document.querySelectorAll(".fb button").forEach(b => b.onclick = () => { fbSet(i, b.dataset.v); shownCard = -2; renderCard(); });
   $("prevM").onclick = () => step(-1);
   $("nextM").onclick = () => step(1);
   $("replay").onclick = () => selectMoment(i, true);
@@ -396,6 +404,27 @@ document.addEventListener("keydown", e => {
 });
 
 // ---------------- video & sync
+// ---------------- feedback (stored per viewer in this browser; export to a file for rule tuning)
+const FB_KEY = "fb:" + D.matchId;
+function fbAll() { try { return JSON.parse(store.get(FB_KEY) || "{}"); } catch (e) { return {}; } }
+function fbGet(i) { const f = fbAll()[i]; return f && f.verdict; }
+function fbSet(i, v) {
+  const all = fbAll(), m = D.moments[i];
+  if (all[i] && all[i].verdict === v) delete all[i];
+  else all[i] = { t: m.t, kind: m.kind, cause: m.cause || m.kind, title: m.title, verdict: v };
+  store.set(FB_KEY, JSON.stringify(all));
+}
+$("exportFb").onclick = () => {
+  const items = Object.values(fbAll());
+  if (!items.length) { alert("まだ評価がありません。解説の下の「合ってる / 違う」を押してください。"); return; }
+  const blob = new Blob([JSON.stringify({ matchId: D.matchId, rulesVersion: D.rulesVersion, items }, null, 1)],
+                        { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `ascendinq-feedback-${D.matchId}.json`;
+  a.click();
+};
+
 const OFF_KEY = "offset:" + D.matchId;
 function startFromName(name) {
   let m = name.match(/(\d{4})-(\d{2})-(\d{2})[ _](\d{2})[-_.](\d{2})[-_.](\d{2})/);  // OBS
