@@ -52,12 +52,37 @@ def run_window(path):
 
     if sys.platform == "win32":
         ctypes.windll.kernel32.CreateMutexW(None, False, MUTEX)
+        if ctypes.windll.kernel32.GetLastError() == 183:  # another window started a moment ago
+            REQUEST.parent.mkdir(parents=True, exist_ok=True)
+            REQUEST.write_text(str(Path(path).resolve()), encoding="utf-8")
+            return
+    try:  # a request that arrived while we were starting wins over the start page
+        pending = REQUEST.read_text(encoding="utf-8-sig").strip()
+        if pending:
+            path = pending
+    except OSError:
+        pass
     REQUEST.unlink(missing_ok=True)
     win = webview.create_window("Ascend InQ", _uri(path), width=1440, height=900, min_size=(960, 600),
                                 background_color="#0e1115", text_select=True, maximized=True)
 
+    loaded = threading.Event()
+    win.events.loaded += lambda: loaded.set()
+
+    def bring_to_front():
+        """Plain async Win32 calls: never block on the GUI thread (cross-thread pywebview
+        calls such as on_top during start-up froze the window once)."""
+        if sys.platform != "win32":
+            return
+        u32 = ctypes.windll.user32
+        hwnd = u32.FindWindowW(None, "Ascend InQ")
+        if hwnd:
+            u32.ShowWindowAsync(hwnd, 9)  # SW_RESTORE
+            u32.SetForegroundWindow(hwnd)
+
     def watch():
         # runs after the GUI loop is up (webview.start's func); never let one failure stop it
+        loaded.wait(30)  # don't navigate while the first page is still loading
         while True:
             time.sleep(0.4)
             try:
@@ -68,16 +93,15 @@ def run_window(path):
             if not target:
                 continue
             try:
+                loaded.clear()
                 win.load_url(_uri(target))
                 (config.ROOT / "logs").mkdir(exist_ok=True)
                 with open(config.ROOT / "logs" / "window.log", "a", encoding="utf-8") as f:
                     f.write(time.strftime("%H:%M:%S") + " open " + target + "\n")
-                win.restore()
-                win.show()
-                win.on_top = True
-                win.on_top = False
+                bring_to_front()
+                loaded.wait(30)  # one navigation at a time
             except Exception:
-                pass
+                loaded.set()
 
     # private_mode=False keeps localStorage (per-game video sync offsets) between sessions
     webview.start(watch, private_mode=False, storage_path=str(config.DATA_DIR / "webview"))
