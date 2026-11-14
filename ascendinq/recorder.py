@@ -185,6 +185,8 @@ class Recording:
             pass
         self.offset = None
         self.items = []  # [[game_time, [itemIDs]]] snapshots of my inventory (client data has no purchase log)
+        self.me = []       # [[game_time, hp_fraction, unspent_gold, level]] every ~5 s
+        self.players = []  # [[game_time, {riotIdGameName: [team, dead, level]}]] every ~15 s
 
     def snapshot_items(self, player):
         """One small localhost request; records my inventory when it changes."""
@@ -198,6 +200,25 @@ class Recording:
         ids = sorted(i.get("itemID", 0) for i in me.get("items", []))
         if not self.items or self.items[-1][1] != ids:
             self.items.append([round(gt, 1), ids])
+        snap = {}
+        for p in lst:
+            name = p.get("riotIdGameName") or (p.get("riotId") or p.get("summonerName") or "").split("#")[0]
+            if name:
+                snap[name] = [100 if p.get("team") == "ORDER" else 200, 1 if p.get("isDead") else 0, p.get("level", 0)]
+        if snap:
+            self.players.append([round(gt, 1), snap])
+
+    def snapshot_me(self):
+        """My HP and unspent gold (one small localhost request)."""
+        d = _live("activeplayer")
+        gt = game_time()
+        if not isinstance(d, dict) or gt is None:
+            return
+        st = d.get("championStats", {})
+        mx = st.get("maxHealth") or 0
+        hp = round(st.get("currentHealth", 0) / mx, 2) if mx else None
+        if hp is not None:
+            self.me.append([round(gt, 1), hp, int(d.get("currentGold", 0)), d.get("level", 0)])
 
     def sync(self):
         """offset = seconds into the video where the in-game clock reads 0:00."""
@@ -332,6 +353,7 @@ def run(after_game=None, poll=4, stop=None, enabled=lambda: True, log=print, on_
                 if rec.offset is None:
                     rec.sync()
                 tick += 1
+                rec.snapshot_me()
                 if tick % 3 == 0:  # every ~15 s
                     rec.snapshot_items(name)
                 if tick == 5:  # ~25 s in: make sure we are not recording a black screen
@@ -344,7 +366,8 @@ def run(after_game=None, poll=4, stop=None, enabled=lambda: True, log=print, on_
         if not path:
             log(f"録画に失敗しました: {err[:300]}")
             continue
-        info = {"start_epoch": rec.start, "offset": rec.offset, "player": name, "items": rec.items}
+        info = {"start_epoch": rec.start, "offset": rec.offset, "player": name, "items": rec.items,
+                "me": rec.me, "players": rec.players}
         sidecar(path).write_text(json.dumps(info, ensure_ascii=False), encoding="utf-8")
         size = path.stat().st_size / 1e9
         log(f"[{dt.datetime.now():%H:%M}] 録画終了: {path.name}（{size:.1f} GB）")

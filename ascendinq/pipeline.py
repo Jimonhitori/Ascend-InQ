@@ -47,9 +47,10 @@ def my_puuid(match, puuid, riot_id=None):
 
 def build(match_id, puuid, video=None, offset=None, riot_id=None):
     m, t = fetch.load_match(match_id)
-    a = analyze.analyze(m, t, my_puuid(m, puuid, riot_id) or puuid)
     if video is None:
-        video = clips.find_video(a["game_start_ms"])
+        start = m["info"].get("gameStartTimestamp") or m["info"].get("gameCreation")
+        video = clips.find_video(start) if start else None
+    a = analyze.analyze(m, t, my_puuid(m, puuid, riot_id) or puuid, clips.load_live(video))
     viewer.build(a, m, t, video, offset)
     return a, report.write(a)
 

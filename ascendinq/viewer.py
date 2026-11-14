@@ -68,34 +68,26 @@ def death_moment(n, d, a):
     if d["lost_after"]:
         facts.append("このデス中に取られた: " + "・".join(d["lost_after"]))
 
-    advice = []
-    early = d["t"] < 15 * 60
-    if d["jg_involved"] and early and role != "JUNGLE":
-        if "敵側" in d["zone"] or "敵陣" in d["zone"]:
-            advice.append("敵側に押し込んだ位置でガンクされた。敵JGの位置が分からない時は、ウェーブを押し切ったらすぐ自陣側へ下がる。")
-        else:
-            advice.append("敵JGのガンク。20秒前の敵JGの位置を見て、来られる距離だったなら先に下がるかフラッシュを温存する。")
-    if d["jg_involved"] and early and role == "JUNGLE":
-        advice.append("敵JGとの戦いで負けた。相手のレベル・体力・味方の寄りやすさを比べて、不利なら競らずに反対側のキャンプへ。")
-    if d["lost_after"]:
-        advice.append(f"このデスで{'・'.join(d['lost_after'])}を取られた。湧き前の1分は「生きていること」を最優先に。")
-    if d["n_enemies"] >= 3 and not d["allies_near"]:
-        advice.append(f"味方がいない場所で{d['n_enemies']}人に捕まった。見えていない敵の人数を数えてから前に出る。")
-    if d["n_enemies"] == 1 and d["killer_is_opp"]:
-        if d.get("opp_level") and d["opp_level"] > d["level"]:
-            advice.append(f"レベルで負けている（{d['level']} vs {d['opp_level']}）状態で1v1をした。レベル差がある時は戦わない。")
-        elif d.get("lane_gold_diff") is not None and d["lane_gold_diff"] < -300:
-            advice.append(f"ゴールドで負けている（{d['lane_gold_diff']:+}）状態で1v1をした。アイテム差がある時は無理をしない。")
-        else:
-            advice.append("条件はほぼ互角の1v1で負けた。動画でスキルの当て合いと相手の主要スキルのCDを確認する。")
-    if not d["allies_near"] and d["my_wards_3min"] == 0 and any(k in d["zone"] for k in ("リバー", "敵陣ジャングル")):
-        advice.append("視界のないリバー/敵陣で倒された。入る前にワードかスイーパーを使う。")
-    if not advice:
-        advice.append("動画で倒される5〜10秒前の判断（前に出た理由・逃げ道）を確認する。")
+    c = d.get("cause")
+    if d.get("hp_before") is not None:
+        facts.append(f"約10秒前の体力 {round(d['hp_before'] * 100)}%")
+    if d.get("gold_unspent") is not None:
+        facts.append(f"未使用ゴールド {d['gold_unspent']}")
+    if d.get("enemies_alive") is not None:
+        facts.append(f"生きていた敵 {d['enemies_alive']}人")
+    if c:
+        p = c["primary"]
+        advice = [f"【{p['label']}】{p['why']} → {p['action']}"]
+        advice += [f"【{s['label']}】{s['why']} → {s['action']}" for s in c["secondary"]]
+        advice += [f"{i['why']} " + (f"→ {i['action']}" if i["action"] else "") for i in c["impacts"]]
+        cause_key = p["key"]
+    else:
+        advice, cause_key = ["動画で倒される5〜10秒前の判断（前に出た理由・逃げ道）を確認する。"], "unknown"
 
     return {
         "t": d["t"], "kind": "death", "icon": "💀", "severity": 3,
-        "title": f"デス{n}: {who} に倒された",
+        "title": f"デス{n}: {who} に倒された" + (f"（{c['primary']['label']}）" if c else ""),
+        "cause": cause_key,
         "sub": d["zone"], "facts": facts, "advice": advice,
         "jump": max(0, d["t"] - 20),
     }
@@ -231,6 +223,7 @@ def build(a, match, timeline, video: Path | None = None, offset: float | None = 
             "line": f"CS {a['stats']['cs']}（{a['stats']['cs_min']}/分） KP {a['stats']['kp']}% 視界 {a['stats']['vision_score']}",
         },
         "focus": a["focus"],
+        "rulesVersion": a.get("rules_version"),
         "issues": a["issues"][:3],
         "good": a["good"],
         "myTeam": a["me"]["team"],

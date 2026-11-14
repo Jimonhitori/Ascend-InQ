@@ -31,6 +31,17 @@ def video_start_epoch(path: Path) -> float:
     return path.stat().st_ctime
 
 
+def load_live(video: Path | None) -> dict:
+    """Live data captured while recording (HP/gold samples, players alive), from the sidecar .json."""
+    if not video:
+        return {}
+    try:
+        info = json.loads(video.with_suffix(".json").read_text(encoding="utf-8"))
+        return {k: info.get(k) for k in ("me", "players") if info.get(k)}
+    except (OSError, ValueError):
+        return {}
+
+
 def video_offset(video: Path, game_start_ms: int) -> float:
     """Seconds into the video where the in-game clock is 0:00.
     Exact when recorded by this tool (sidecar .json), else estimated from the start time."""
