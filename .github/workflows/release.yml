@@ -1,0 +1,62 @@
+name: Release
+
+# Push a tag like v0.2.0 to build AscendInQ.exe and publish it on GitHub Releases.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt pyinstaller
+
+      - name: Test
+        run: python -m pytest -q
+
+      - name: Build exe
+        shell: cmd
+        run: build.bat
+
+      - name: Smoke test (exe starts and exits)
+        shell: pwsh
+        run: |
+          $p = Start-Process dist\AscendInQ\AscendInQ.exe -ArgumentList "--selftest" -PassThru -Wait
+          Get-Content dist\AscendInQ\logs\selftest.txt
+          # selftest needs saved games, so a clean runner reports FAIL; only a crash (no log) is fatal
+          if (-not (Test-Path dist\AscendInQ\logs\selftest.txt)) { exit 1 }
+          Remove-Item dist\AscendInQ\logs -Recurse -Force
+
+      - name: Zip
+        shell: pwsh
+        run: Compress-Archive -Path dist\AscendInQ -DestinationPath AscendInQ-windows.zip
+
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $notes = @"
+          ## 使い方 / How to use
+          1. ``AscendInQ-windows.zip`` をダウンロードして展開 / Download and unzip
+          2. ``AscendInQ\AscendInQ.exe`` を起動 / Run ``AscendInQ\AscendInQ.exe``
+          3. 初回は ffmpeg（約85MB）のダウンロードを確認されます / First run asks to download ffmpeg (~85 MB)
+          4. LoL をプレイするだけ（ウィンドウモードは「ボーダーレス」推奨） / Just play LoL (Borderless window mode)
+
+          コード署名がないため SmartScreen の警告が出ることがあります（「詳細情報」→「実行」）。
+          Not code-signed: SmartScreen may warn ("More info" → "Run anyway").
+          "@
+          $extra = @()
+          if ("${{ github.ref_name }}" -like "v0.*") { $extra += "--prerelease" }
+          gh release create "${{ github.ref_name }}" AscendInQ-windows.zip --title "Ascend InQ ${{ github.ref_name }}" --notes "$notes" --generate-notes @extra

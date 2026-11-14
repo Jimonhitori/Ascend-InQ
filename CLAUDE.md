@@ -27,3 +27,7 @@ MIT License で公開している OSS。個人用の情報は `CLAUDE.local.md`�
 - ルーティング: Account-V1 / Match-V5 は `REGION`（既定 asia）、プラットフォームは `PLATFORM`（既定 jp1）
 - Riot API にワードの設置位置は無い。位置は1分ごとのフレーム＋イベントからの推定
 - 同じアカウントでも PUUID は Riot API（キーごとに暗号化）とクライアントで異なる。`pipeline.my_puuid` で名前から補う
+
+## リリース
+- コードの push はこまめに。exe の配布（Releases）は区切りのいいときだけ（実戦で数試合確認してから）
+- `git tag vX.Y.Z && git push origin vX.Y.Z` で `.github/workflows/release.yml` がテスト → exe ビルド → Releases 公開まで自動で行う（v0.x はプレリリース扱い）
