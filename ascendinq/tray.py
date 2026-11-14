@@ -13,9 +13,10 @@ from pathlib import Path
 
 import pystray
 
-from . import config, fetch, pipeline, recorder
+from . import config
 from .i18n import t
 from .icon import make_icon
+from .window import open_in_app
 
 APP = "Ascend InQ"
 
@@ -98,6 +99,7 @@ class TrayApp:
 
     # ------------------------------------------------------------ recorder
     def after_game(self, video, info):
+        from . import pipeline
         if not config.settings()["auto_review"]:
             self.notify(t("n.saved"), video.name)
             return
@@ -106,7 +108,7 @@ class TrayApp:
         if a:
             self.notify(t("n.ready"), t("n.focus") + a["focus"])
             if config.settings()["open_viewer"]:
-                os.startfile(path)
+                open_in_app(path)
 
     def ensure_ffmpeg(self) -> bool:
         if config.ffmpeg_path():
@@ -125,6 +127,10 @@ class TrayApp:
         return True
 
     def recorder_loop(self):
+        # heavy imports (requests etc.) happen here, after the tray icon is already visible
+        from . import recorder
+        if recorder.league_window_mode() == 0 and config.settings()["capture"] != "off":
+            self.alert(t("n.fullscreen"), t("n.fullscreen_msg"))
         if not self.ensure_ffmpeg():
             self.set_state("error")
             return
@@ -143,21 +149,23 @@ class TrayApp:
         self.set_setting("open_viewer", not config.settings()["open_viewer"])
 
     def open_latest(self, icon=None, item=None):
+        from . import pipeline
         p = pipeline.latest_viewer()
         if p:
-            os.startfile(p)
+            open_in_app(p)
         else:
             self.notify(t("n.no_games"), t("n.no_games_msg"), important=True)
 
     def open_index(self, icon=None, item=None):
         p = config.REPORT_DIR / "index.html"
         if p.exists():
-            os.startfile(p)
+            open_in_app(p)
         else:
             self.import_recent()
 
     def import_recent(self, icon=None, item=None):
         def work():
+            from . import pipeline
             if config.settings()["source"] == "api" and not config.riot_id():
                 raise RuntimeError(t("n.need_riot_id"))
             self.notify(t("n.importing"), t("n.importing_msg"))
@@ -167,7 +175,7 @@ class TrayApp:
             idx = pipeline.refresh_index(riot_id, puuid)
             self.notify(t("n.imported"), t("n.imported_msg", rid=riot_id, n=len(new)))
             if idx:
-                os.startfile(idx)
+                open_in_app(idx)
         self.background(work)
 
     def open_folder(self, target):
@@ -230,8 +238,6 @@ class TrayApp:
             self.open_settings()
         else:
             self.notify(APP, t("n.started"))
-        if recorder.league_window_mode() == 0 and config.settings()["capture"] != "off":
-            self.alert(t("n.fullscreen"), t("n.fullscreen_msg"))
         self.worker = threading.Thread(target=self.recorder_loop, daemon=True)
         self.worker.start()
 
@@ -241,6 +247,7 @@ class TrayApp:
 
 def selftest() -> int:
     """Build the viewer for the newest cached match (used to check a packaged build)."""
+    from . import fetch, pipeline, recorder
     (config.ROOT / "logs").mkdir(exist_ok=True)
     out = config.ROOT / "logs" / "selftest.txt"
     try:
@@ -260,6 +267,10 @@ def selftest() -> int:
 def main():
     if "--selftest" in sys.argv:
         sys.exit(selftest())
+    if "--window" in sys.argv:
+        from .window import run_window
+        run_window(sys.argv[sys.argv.index("--window") + 1])
+        return
     if "--settings" in sys.argv:
         from .settings_window import open_window
         open_window()

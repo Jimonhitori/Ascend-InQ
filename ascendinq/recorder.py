@@ -201,9 +201,14 @@ class Recording:
 
     def sync(self):
         """offset = seconds into the video where the in-game clock reads 0:00."""
+        # The Live Client API already answers during the loading screen, but its clock sits at 0
+        # until the game actually starts. Only sync once the clock is clearly running, otherwise
+        # the offset is off by the remaining loading time (seen as ~4 s in a real game).
+        t0 = time.time()
         gt = game_time()
-        if gt is not None:
-            self.offset = round((time.time() - self.start) - gt, 2)
+        t1 = time.time()
+        if gt is not None and gt >= 3:
+            self.offset = round(((t0 + t1) / 2 - self.start) - gt, 2)
 
     def alive(self):
         return self.proc.poll() is None
@@ -254,7 +259,23 @@ def check_ready():
     exe = config.ffmpeg_path()
     if not exe:
         raise RuntimeError("ffmpeg が見つかりません。")
+    # Launching ffmpeg just to list encoders costs ~1 s of CPU/disk, so remember the answer
+    # for this exact ffmpeg build and only ask again when it changes.
+    cache = config.DATA_DIR / "encoder.json"
+    try:
+        stamp = f"{exe}|{Path(exe).stat().st_mtime_ns}"
+    except OSError:
+        stamp = exe
+    try:
+        c = json.loads(cache.read_text(encoding="utf-8"))
+        if c.get("ffmpeg") == stamp and c.get("encoder"):
+            return exe, c["encoder"]
+    except (OSError, ValueError):
+        pass
     enc = pick_encoder(exe)
+    if enc:
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text(json.dumps({"ffmpeg": stamp, "encoder": enc}), encoding="utf-8")
     if not enc:
         raise RuntimeError("GPUエンコーダー（NVENC/AMF/QSV）が使えないため、軽量録画ができません。")
     return exe, enc
