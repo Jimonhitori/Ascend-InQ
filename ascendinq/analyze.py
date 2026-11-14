@@ -368,6 +368,16 @@ def analyze(match: dict, timeline: dict, puuid: str, live: dict | None = None) -
     roams_mine = kill_list(my_id) if me["role"] == "MIDDLE" else []
     roams_enemy_mid = kill_list(emid["pid"]) if emid and me["role"] == "MIDDLE" else []
 
+    from .roams import analyze_roams
+    deaths_of = {}
+    for e in events:
+        if e["type"] == "CHAMPION_KILL" and e.get("victimId") in by_id:
+            v = e["victimId"]
+            deaths_of.setdefault(v, []).append(
+                (e["timestamp"] / 1000, respawn_estimate(level_at(timeline, v, e["timestamp"]), e["timestamp"] / 1000)))
+    roams = analyze_roams(events=events, frames=timeline["info"]["frames"], pos=pos, zone_fn=zone, me=me, opp=opp,
+                          ejg=ejg, by_id=by_id, my_team=my_team, deaths_of=deaths_of)
+
     # ------------------------------------------------ totals
     team_kills = sum(p["kills"] for p in parts if p["teamId"] == my_team)
     minutes = max(1, duration / 60)
@@ -394,7 +404,7 @@ def analyze(match: dict, timeline: dict, puuid: str, live: dict | None = None) -
         "stats": stats, "lane": lane, "deaths": deaths, "objectives": objectives,
         "towers": towers, "mid_plates": plates if has_plates else None, "items": items,
         "data_missing": [k for k, ok in (("wards", has_wards), ("items", has_items), ("plates", has_plates)) if not ok],
-        "roams_mine": roams_mine, "roams_enemy_mid": roams_enemy_mid,
+        "roams_mine": roams_mine, "roams_enemy_mid": roams_enemy_mid, "roams": roams,
     }
     if a["remake"] or duration < 6 * 60:
         a["remake"] = True
@@ -477,15 +487,21 @@ def find_issues(a):
         elif diff >= 800:
             good.append(f"15分で対面にゴールド{diff:+}差")
 
-    # 8. enemy mid roams
-    if len(a["roams_enemy_mid"]) >= 2 and len(a["roams_enemy_mid"]) > len(a["roams_mine"]):
-        add(1.5 * len(a["roams_enemy_mid"]), "相手MIDのロームに対応できていない",
-            "相手MIDのレーン外キル関与（15分まで）: " +
-            "、".join(f"{mmss(r['t'])} {r['zone']}" for r in a["roams_enemy_mid"]) +
-            f" / 自分のローム関与 {len(a['roams_mine'])}回",
-            "相手MIDが見えなくなったらすぐピンを出し、ウェーブを押してタワープレートを取るか一緒に寄る。")
-    elif len(a["roams_mine"]) >= 2:
-        good.append(f"15分までに{len(a['roams_mine'])}回レーン外のキルに関与")
+    # 8. lane opponent roams (all lane roles)
+    ro = (a.get("roams") or {}).get("opp")
+    if ro and a.get("opp"):
+        idle = [tr for tr in ro["trips"] if tr["response"] == "nothing"]
+        if len(ro["success"]) >= 2 or (ro["success"] and idle):
+            add(1.5 * len(ro["success"]) + 0.5 * len(idle), "対面のロームに対応できていない",
+                f"対面（{a['opp']['champ_ja']}）がレーンを離れてキルに関与: "
+                + "、".join(f"{mmss(r['t'])} {r['zone']}" for r in ro["success"])
+                + (f" / 対面がいない間に何もできなかった時間: {len(idle)}回" if idle else ""),
+                "対面が見えなくなったらすぐピンを出し、ウェーブを押してプレートかCSを取る（または一緒に寄る）。")
+        elif len(ro["trips"]) >= 2 and not idle:
+            good.append(f"対面のローム{len(ro['trips'])}回に、追いかけるかCSを取って対応できた")
+    rm = (a.get("roams") or {}).get("mine")
+    if rm and len(rm["success"]) >= 2:
+        good.append(f"15分までに{len(rm['success'])}回レーン外のキルに関与")
 
     # 9. vision
     if role != "UTILITY":

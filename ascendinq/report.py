@@ -2,6 +2,7 @@
 import datetime as dt
 import html
 import json
+from pathlib import Path
 
 from . import config
 from .analyze import mmss, ROLE_JA
@@ -119,68 +120,39 @@ def _md_inline_to_html(text: str) -> str:
     return "".join(f"<b>{p}</b>" if i % 2 else p for i, p in enumerate(parts))
 
 
+TEMPLATES = Path(__file__).parent
+
+
+def _render(template, data):
+    html_text = (TEMPLATES / template).read_text(encoding="utf-8")
+    return html_text.replace("/*__DATA__*/null", json.dumps(data, ensure_ascii=False).replace("</", "<\\/"))
+
+
 def to_html(a) -> str:
-    """Render the markdown into simple HTML (tables, lists, headings, images)."""
-    md = to_markdown(a).splitlines()
-    out, in_table, in_list = [], False, False
-    for line in md:
-        if line.startswith("|"):
-            cells = [c.strip() for c in line.strip("|").split("|")]
-            if set("".join(cells)) <= set("-"):
-                continue
-            if not in_table:
-                out.append("<table>")
-                in_table = "head"
-            tag = "th" if in_table == "head" else "td"
-            out.append("<tr>" + "".join(f"<{tag}>{_md_inline_to_html(c)}</{tag}>" for c in cells) + "</tr>")
-            in_table = True
-            continue
-        if in_table:
-            out.append("</table>")
-            in_table = False
-        stripped = line.strip()
-        is_item = stripped.startswith("- ") or (stripped[:2].rstrip(".").isdigit() and ". " in stripped[:4])
-        if in_list and not is_item and not line.startswith("   "):
-            out.append("</ul>")
-            in_list = False
-        if line.startswith("# "):
-            cls = "win" if a["win"] else "lose"
-            out.append(f"<h1 class='{cls}'>{html.escape(line[2:])}</h1>")
-        elif line.startswith("## "):
-            out.append(f"<h2>{html.escape(line[3:])}</h2>")
-        elif line.startswith("### "):
-            out.append(f"<h3>{html.escape(line[4:])}</h3>")
-        elif line.startswith("> "):
-            out.append(f"<div class='focus'>{_md_inline_to_html(line[2:].replace('**', ''))}</div>")
-        elif line.startswith("!["):
-            src = line[line.index("(") + 1:-1]
-            out.append(f"<span class='stills'><img src='{html.escape(src)}'></span>")
-        elif is_item:
-            if not in_list:
-                out.append("<ul>")
-                in_list = True
-            body = stripped[2:] if stripped.startswith("- ") else stripped.split(". ", 1)[1]
-            if "](" in body:
-                label, href = body.split("](", 1)
-                body_html = f"動画: <a href='{html.escape(href.rstrip(')'))}'>開く</a>"
-            else:
-                body_html = _md_inline_to_html(body)
-            out.append(f"<li>{body_html}</li>")
-        elif line.startswith("   - "):
-            out.append(f"<div style='margin-left:1.5em'>{_md_inline_to_html(line[5:])}</div>")
-        elif line.startswith("※"):
-            out.append(f"<p class='note'>{html.escape(line)}</p>")
-        elif line == "---":
-            out.append("<hr>")
-        elif line:
-            out.append(f"<p>{_md_inline_to_html(line)}</p>")
-    if in_table:
-        out.append("</table>")
-    if in_list:
-        out.append("</ul>")
-    title = html.escape(md[0][2:])
-    return (f"<!doctype html><html lang='ja'><head><meta charset='utf-8'><title>{title}</title>"
-            f"<style>{CSS}</style></head><body>{''.join(out)}</body></html>")
+    """Visual report: cards, death timeline + map, lane bars, roams (rendered client-side, no libraries)."""
+    title = f"{a['me']['champ_ja']} {'勝ち' if a['win'] else '負け'}"
+    clips = []
+    for n in range(1, len(a.get("deaths", [])) + 1):
+        video, stills = _clip_files(a["match_id"], n)
+        rel = f"../clips/{a['match_id']}/"
+        clips.append({"video": rel + video.name if video else None, "stills": [rel + s.name for s in stills]})
+    return _render("report_template.html", dict(a, clips=clips)).replace("__TITLE__", html.escape(title))
+
+
+def summary(a) -> dict:
+    """Compact per-game row for the index page."""
+    from collections import Counter
+    s = a["stats"]
+    causes = Counter(d["cause"]["primary"]["key"] for d in a["deaths"] if d.get("cause"))
+    top = a["issues"][0] if a["issues"] else None
+    return {
+        "id": a["match_id"], "start": a["game_start_ms"], "win": a["win"], "remake": a["remake"],
+        "champ": a["me"]["champ"], "champ_ja": a["me"]["champ_ja"], "role": a["me"]["role"],
+        "opp": a["opp"]["champ_ja"] if a["opp"] else "",
+        "kda": f"{s['kills']}/{s['deaths']}/{s['assists']}", "deaths": s["deaths"], "cs_min": s["cs_min"], "kp": s["kp"],
+        "focus": a["focus"], "issue": top["title"] if top else "", "top_cause": top.get("cause") if top else None,
+        "causes": dict(causes),
+    }
 
 
 def write(a):
@@ -193,24 +165,8 @@ def write(a):
 
 
 def write_index(analyses):
-    """reports/index.html: list of games + recurring issues across games."""
-    from collections import Counter
-    rows, counter = [], Counter()
-    for a in analyses:
-        start, result, title, line = _header(a)
-        top = a["issues"][0]["title"] if a["issues"] else "-"
-        for iss in a["issues"][:3]:
-            counter[iss["title"]] += 1
-        cls = "win" if a["win"] else "lose"
-        rows.append(f"<tr><td>{start}</td><td class='{cls}'>{result}</td>"
-                    f"<td><a href='{a['match_id']}_viewer.html'>▶ {html.escape(title)}</a>"
-                    f" <a href='{a['match_id']}.html' style='font-size:.85em'>(レポート)</a></td>"
-                    f"<td>{html.escape(line)}</td><td>{html.escape(top)}</td></tr>")
-    trend = "".join(f"<li>{html.escape(t)}（{n}試合）</li>" for t, n in counter.most_common(5))
-    body = (f"<h1>Ascend InQ — 試合一覧</h1><h2>よく出る改善点（直近{len(analyses)}試合のトップ3から集計）</h2><ul>{trend}</ul>"
-            "<h2>試合</h2><table><tr><th>日時</th><th>結果</th><th>チャンピオン</th><th>成績</th><th>一番の改善点</th></tr>"
-            + "".join(rows) + "</table>")
+    """reports/index.html: game cards, most common death causes, trends."""
+    rows = sorted((summary(a) for a in analyses), key=lambda r: r["start"] or 0, reverse=True)
     path = config.REPORT_DIR / "index.html"
-    path.write_text(f"<!doctype html><html lang='ja'><head><meta charset='utf-8'><title>Ascend InQ</title>"
-                    f"<style>{CSS}</style></head><body>{body}</body></html>", encoding="utf-8")
+    path.write_text(_render("index_template.html", rows), encoding="utf-8")
     return path

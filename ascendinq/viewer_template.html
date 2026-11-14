@@ -478,6 +478,8 @@ buildTimeline();
 renderList();
 if (D.video) useVideo(D.video, D.videoName); else setupStage();
 const firstDeath = D.moments.findIndex(m => m.kind === "death");
+const hashT = location.hash.match(/t=(\d+)/);
+if (hashT) seek(+hashT[1]);
 update();
 requestAnimationFrame(loop);
 </script>
