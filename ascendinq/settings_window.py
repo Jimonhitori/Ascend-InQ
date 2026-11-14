@@ -267,7 +267,7 @@ class SettingsWindow:
         # after game
         sec = self._section(t("s.after"))
         self.auto_review = self._row(sec, t("s.auto_review"), lambda m: Toggle(m, s["auto_review"]), t("s.auto_review_sub"))
-        self.open_viewer = self._row(sec, t("s.open_viewer"), lambda m: Toggle(m, s["open_viewer"]))
+        self.open_viewer = self._row(sec, t("s.open_viewer"), lambda m: Toggle(m, s["open_viewer"]), t("s.open_viewer_sub"))
 
         # general
         sec = self._section(t("s.general"))

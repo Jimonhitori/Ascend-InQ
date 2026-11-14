@@ -108,7 +108,7 @@ class TrayApp:
         if a:
             self.notify(t("n.ready"), t("n.focus") + a["focus"])
             if config.settings()["open_viewer"]:
-                open_in_app(path)
+                open_in_app(path, front=False, start_if_closed=False)  # never pop up after a game
 
     def ensure_ffmpeg(self) -> bool:
         if config.ffmpeg_path():
