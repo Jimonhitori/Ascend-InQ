@@ -6,6 +6,7 @@ import webbrowser
 from tkinter import filedialog, ttk
 
 from . import autostart, config
+from .i18n import t
 from .icon import make_icon
 
 BG, PANEL, CARD, LINE = "#14181d", "#1b2027", "#232a33", "#2c343e"
@@ -93,7 +94,7 @@ class SettingsWindow:
         self.s = config.settings()
 
         self.root = root = tk.Tk()
-        root.title("Ascend InQ — 設定")
+        root.title(t("s.title"))
         root.configure(bg=BG)
         root.geometry("720x780")
         root.minsize(600, 500)
@@ -125,8 +126,8 @@ class SettingsWindow:
         bar.pack(fill="x", side="bottom")
         self.status = tk.Label(bar, text="", font=FONT, bg=PANEL, fg=MUTED)
         self.status.pack(side="left", padx=16)
-        self._button(bar, "保存", self.save, primary=True).pack(side="right", padx=(6, 16), pady=10)
-        self._button(bar, "キャンセル", root.destroy).pack(side="right", pady=10)
+        self._button(bar, t("s.save"), self.save, primary=True).pack(side="right", padx=(6, 16), pady=10)
+        self._button(bar, t("s.cancel"), root.destroy).pack(side="right", pady=10)
 
     # ------------------------------------------------------------ widgets
     def _style(self):
@@ -159,7 +160,7 @@ class SettingsWindow:
         f.pack(fill="x", padx=20, pady=(16, 0))
         tk.Label(f, text=title, font=FONT_H, bg=PANEL, fg=TEXT).pack(anchor="w", padx=18, pady=(14, 0))
         if sub:
-            tk.Label(f, text=sub, font=FONT_S, bg=PANEL, fg=MUTED).pack(anchor="w", padx=18)
+            tk.Label(f, text=sub, font=FONT_S, bg=PANEL, fg=MUTED, justify="left", wraplength=620).pack(anchor="w", padx=18)
         inner = tk.Frame(f, bg=PANEL)
         inner.pack(fill="x", padx=18, pady=(8, 14))
         inner.columnconfigure(0, weight=1)
@@ -171,7 +172,7 @@ class SettingsWindow:
         box.grid(row=r, column=0, sticky="we", pady=6)
         tk.Label(box, text=label, font=FONT, bg=PANEL, fg=TEXT).pack(anchor="w")
         if sub:
-            tk.Label(box, text=sub, font=FONT_S, bg=PANEL, fg=MUTED, justify="left", wraplength=380).pack(anchor="w")
+            tk.Label(box, text=sub, font=FONT_S, bg=PANEL, fg=MUTED, justify="left", wraplength=320).pack(anchor="w")
         w = widget_fn(sec)
         w.grid(row=r, column=1, sticky="e", pady=6, padx=(12, 0))
         return w
@@ -187,17 +188,17 @@ class SettingsWindow:
     def _build(self):
         s = self.s
         tk.Label(self.body, text="Ascend InQ", font=("Yu Gothic UI", 20, "bold"), bg=BG, fg=GOLD).pack(anchor="w", padx=22, pady=(18, 0))
-        tk.Label(self.body, text="設定", font=FONT, bg=BG, fg=MUTED).pack(anchor="w", padx=22)
+        tk.Label(self.body, text=t("s.heading"), font=FONT, bg=BG, fg=MUTED).pack(anchor="w", padx=22)
 
         # data source
-        sec = self._section("試合データ", "試合後の分析に使うデータの取り方")
+        sec = self._section(t("s.data"), t("s.data_sub"))
         self.source = ChoiceCards(sec, [
-            ("client", "LoL クライアントから", "おすすめ。APIキー不要。ログイン中のアカウントの試合を読みます"),
-            ("api", "Riot APIキー", "上級者向け。開発者サイトで発行したキーで、どのアカウントの試合も取得"),
+            ("client", t("s.src_client"), t("s.src_client_sub")),
+            ("api", t("s.src_api"), t("s.src_api_sub")),
         ], s["source"])
         self.source.grid(row=0, column=0, columnspan=2, sticky="we", pady=(0, 6))
-        for key, (card, dot, t, sub) in self.source.cards.items():
-            for w in (card, dot, t, sub):
+        for key, (card, dot, tt, sub) in self.source.cards.items():
+            for w in (card, dot, tt, sub):
                 w.bind("<Button-1>", lambda e, k=key: (self.source.select(k), self._show_api()), add="+")
 
         import os
@@ -214,25 +215,26 @@ class SettingsWindow:
             f = tk.Frame(master, bg=PANEL)
             self.key = self._entry(f, key, width=30, show="•")
             self.key.pack(side="left")
-            show = tk.Label(f, text="表示", font=FONT_S, bg=PANEL, fg=GOLD, cursor="hand2")
+            show = tk.Label(f, text=t("s.show"), font=FONT_S, bg=PANEL, fg=GOLD, cursor="hand2")
             show.pack(side="left", padx=(8, 0))
             show.bind("<Button-1>", lambda e: self.key.configure(show="" if self.key.cget("show") else "•"))
             return f
-        self._row(api, "Riot APIキー", key_widget, "開発用キーは24時間で失効します")
-        link = tk.Label(api, text="→ developer.riotgames.com でキーを発行する", font=FONT_S, bg=PANEL, fg=GOLD, cursor="hand2")
+        self._row(api, t("s.api_key"), key_widget, t("s.api_key_sub"))
+        link = tk.Label(api, text=t("s.get_key"), font=FONT_S, bg=PANEL, fg=GOLD, cursor="hand2")
         link.grid(row=api.grid_size()[1], column=0, sticky="w")
         link.bind("<Button-1>", lambda e: webbrowser.open("https://developer.riotgames.com/"))
-        self.rid = self._row(api, "Riot ID", lambda m: self._entry(m, rid, width=30), "例: Name#JP1（名前#タグ）")
-        servers = [f"{label}" for label, _ in config.SERVERS.values()]
-        cur = config.SERVERS.get(config.platform(), config.SERVERS["jp1"])[0]
-        self.server = self._row(api, "サーバー", self._combo(servers, cur, 26))
+        self.rid = self._row(api, "Riot ID", lambda m: self._entry(m, rid, width=30), t("s.riot_id_sub"))
+        self.server_keys = list(config.SERVERS)
+        labels = [label for label, _ in config.SERVERS.values()]
+        cur = config.platform() if config.platform() in config.SERVERS else "jp1"
+        self.server = self._row(api, t("s.server"), self._combo(labels, config.SERVERS[cur][0], 26))
         self._show_api()
 
         # recording
-        sec = self._section("録画", "LoLの試合中だけ、GPUで軽く録画します")
+        sec = self._section(t("s.rec"), t("s.rec_sub"))
         self.capture = ChoiceCards(sec, [
-            ("match", "試合全体", "試合が始まったら自動で録画し、終わったら止める"),
-            ("off", "録画しない", "録画はせず、試合データの分析だけ行う"),
+            ("match", t("s.cap_match"), t("s.cap_match_sub")),
+            ("off", t("s.cap_off"), t("s.cap_off_sub")),
         ], s["capture"])
         self.capture.grid(row=sec.grid_size()[1], column=0, columnspan=2, sticky="we", pady=(0, 6))
 
@@ -240,36 +242,41 @@ class SettingsWindow:
             f = tk.Frame(master, bg=PANEL)
             self.save_dir = self._entry(f, s["save_dir"] or str(config.ROOT / "recordings"), width=30)
             self.save_dir.pack(side="left")
-            self._button(f, "参照…", self.pick_dir).pack(side="left", padx=(6, 0))
+            self._button(f, t("s.browse"), self.pick_dir).pack(side="left", padx=(6, 0))
             return f
-        self._row(sec, "保存先", dir_widget)
-        keeps = ["10", "20", "30", "50", "100", "無制限"]
-        self.keep = self._row(sec, "残す録画の数", self._combo(keeps, "無制限" if not s["keep"] else str(s["keep"]), 10),
-                              "超えたら古い録画から自動で削除します（1試合 約1GB）")
-        qualities = [f"{label}" for label, _ in config.QUALITY.values()]
-        self.quality = self._row(sec, "画質", self._combo(qualities, config.QUALITY.get(s["quality"], config.QUALITY["standard"])[0], 10),
-                                 "高画質ほどファイルが大きくなります")
-        self.fps = self._row(sec, "フレームレート", self._combo(["30", "60"], str(s["fps"]), 10))
+        self._row(sec, t("s.folder"), dir_widget)
+        self.keep_values = [10, 20, 30, 50, 100, 0]
+        keep_labels = [str(v) if v else t("s.unlimited") for v in self.keep_values]
+        cur_keep = s["keep"] if s["keep"] in self.keep_values else 30
+        self.keep = self._row(sec, t("s.keep"), self._combo(keep_labels, keep_labels[self.keep_values.index(cur_keep)], 10),
+                              t("s.keep_sub"))
+        self.quality_keys = list(config.QUALITY)
+        q_labels = [t("q." + k) for k in self.quality_keys]
+        cur_q = s["quality"] if s["quality"] in self.quality_keys else "standard"
+        self.quality = self._row(sec, t("s.quality"), self._combo(q_labels, q_labels[self.quality_keys.index(cur_q)], 10),
+                                 t("s.quality_sub"))
+        self.fps = self._row(sec, t("s.fps"), self._combo(["30", "60"], str(s["fps"]), 10))
         try:
             n = max(1, ctypes.windll.user32.GetSystemMetrics(80))
         except Exception:
             n = 1
-        monitors = [f"モニター{i + 1}" + ("（メイン）" if i == 0 else "") for i in range(n)]
-        self.monitor = self._row(sec, "録画するモニター", self._combo(monitors, monitors[min(int(s["monitor"]), n - 1)], 16))
-        self.cursor = self._row(sec, "マウスカーソルを録画", lambda m: Toggle(m, s["cursor"]))
+        monitors = [t("s.monitor_n", n=i + 1) + (t("s.main") if i == 0 else "") for i in range(n)]
+        self.monitor = self._row(sec, t("s.monitor"), self._combo(monitors, monitors[min(int(s["monitor"]), n - 1)], 16))
+        self.cursor = self._row(sec, t("s.cursor"), lambda m: Toggle(m, s["cursor"]))
 
         # after game
-        sec = self._section("試合後")
-        self.auto_review = self._row(sec, "試合データを自動で分析", lambda m: Toggle(m, s["auto_review"]),
-                                     "試合が終わったら試合データを読み込んで、解説を作ります")
-        self.open_viewer = self._row(sec, "ビューアを自動で開く", lambda m: Toggle(m, s["open_viewer"]))
+        sec = self._section(t("s.after"))
+        self.auto_review = self._row(sec, t("s.auto_review"), lambda m: Toggle(m, s["auto_review"]), t("s.auto_review_sub"))
+        self.open_viewer = self._row(sec, t("s.open_viewer"), lambda m: Toggle(m, s["open_viewer"]))
 
         # general
-        sec = self._section("一般")
-        self.autostart = self._row(sec, "PC起動時に Ascend InQ を起動", lambda m: Toggle(m, autostart.is_enabled()),
-                                   "オフのときは、LoLをやる前に自分で起動してください")
-        self.notify = self._row(sec, "通知を表示", lambda m: Toggle(m, s["notify"]),
-                                "録画の開始・振り返りの準備完了などをお知らせします")
+        sec = self._section(t("s.general"))
+        self.lang_keys = ["auto", "ja", "en"]
+        lang_labels = [t("s.lang_auto"), "日本語", "English"]
+        cur_l = s.get("language", "auto") if s.get("language", "auto") in self.lang_keys else "auto"
+        self.language = self._row(sec, t("s.language"), self._combo(lang_labels, lang_labels[self.lang_keys.index(cur_l)], 22))
+        self.autostart = self._row(sec, t("s.autostart"), lambda m: Toggle(m, autostart.is_enabled()), t("s.autostart_sub"))
+        self.notify = self._row(sec, t("s.notify"), lambda m: Toggle(m, s["notify"]), t("s.notify_sub"))
         tk.Frame(self.body, bg=BG, height=20).pack()
 
     # ------------------------------------------------------------ actions
@@ -288,9 +295,9 @@ class SettingsWindow:
     def save(self):
         rid = self.rid.get().strip()
         if self.source.get() == "api" and (not rid or "#" not in rid):
-            self.status.configure(text="Riot ID は「名前#タグ」の形で入力してください", fg="#ff7b7b")
+            self.status.configure(text=t("s.err_riot_id"), fg="#ff7b7b")
             return
-        platform = next(k for k, (label, _) in config.SERVERS.items() if label == self.server.get())
+        platform = self.server_keys[max(0, self.server.current())]
         env = {"RIOT_ID": rid, "PLATFORM": platform, "REGION": config.SERVERS[platform][1]}
         key = self.key.get().strip()
         if key:
@@ -299,28 +306,28 @@ class SettingsWindow:
 
         save_dir = self.save_dir.get().strip()
         default_dir = str(config.ROOT / "recordings")
-        keep = self.keep.get()
         s = dict(self.s)
         s.update({
             "source": self.source.get(),
             "capture": self.capture.get(),
             "save_dir": "" if save_dir in ("", default_dir) else save_dir,
-            "keep": 0 if keep == "無制限" else int(keep),
-            "quality": next(k for k, (label, _) in config.QUALITY.items() if label == self.quality.get()),
+            "keep": self.keep_values[max(0, self.keep.current())],
+            "quality": self.quality_keys[max(0, self.quality.current())],
             "fps": int(self.fps.get()),
-            "monitor": int(self.monitor.get().replace("モニター", "").split("（")[0]) - 1,
+            "monitor": max(0, self.monitor.current()),
             "cursor": self.cursor.get(),
             "auto_review": self.auto_review.get(),
             "open_viewer": self.open_viewer.get(),
             "notify": self.notify.get(),
+            "language": self.lang_keys[max(0, self.language.current())],
         })
         config.save_settings(s)
         try:
             autostart.set_enabled(self.autostart.get())
         except OSError as e:
-            self.status.configure(text=f"自動起動の設定に失敗: {e}", fg="#ff7b7b")
+            self.status.configure(text=t("s.err_autostart", e=e), fg="#ff7b7b")
             return
-        self.status.configure(text="保存しました", fg=GOLD)
+        self.status.configure(text=t("s.saved"), fg=GOLD)
         self.root.after(600, self.root.destroy)
 
     def run(self):

@@ -77,9 +77,9 @@ def _find_in(game_start_ms: int, folder: Path, recursive: bool) -> Path | None:
 
 
 def _ffmpeg(args):
-    exe = shutil.which("ffmpeg")
+    exe = config.ffmpeg_path()
     if not exe:
-        raise RuntimeError("ffmpeg が見つかりません。インストールして PATH を通してください。")
+        raise RuntimeError("ffmpeg が見つかりません。アプリを起動して ffmpeg をダウンロードしてください。")
     flags = 0x00004000 | 0x08000000 if sys.platform == "win32" else 0  # below-normal priority, no console window
     r = subprocess.run([exe, "-hide_banner", "-loglevel", "error", "-y", *args],
                        capture_output=True, text=True, creationflags=flags)

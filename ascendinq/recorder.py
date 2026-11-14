@@ -18,6 +18,7 @@ import requests
 import urllib3
 
 from . import config
+from .i18n import t
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -25,6 +26,102 @@ LIVE = "https://127.0.0.1:2999/liveclientdata"
 BELOW_NORMAL = 0x00004000
 NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0  # no console flash from the tray app
 MAX_MINUTES = 90
+MIN_FREE_GB = 3      # don't start a recording with less free space than this
+STOP_FREE_GB = 1     # stop an ongoing recording below this
+
+
+# ---------------------------------------------------------------- safety: kill ffmpeg if we die
+_job = None
+
+
+def _bind_to_job(proc):
+    """Put ffmpeg in a Windows Job Object that is killed when this app exits or crashes,
+    so a recording can never keep running on its own."""
+    global _job
+    if sys.platform != "win32":
+        return
+    import ctypes
+    from ctypes import wintypes
+    k32 = ctypes.windll.kernel32
+
+    class BASIC(ctypes.Structure):
+        _fields_ = [("PerProcessUserTimeLimit", ctypes.c_int64), ("PerJobUserTimeLimit", ctypes.c_int64),
+                    ("LimitFlags", wintypes.DWORD), ("MinimumWorkingSetSize", ctypes.c_size_t),
+                    ("MaximumWorkingSetSize", ctypes.c_size_t), ("ActiveProcessLimit", wintypes.DWORD),
+                    ("Affinity", ctypes.c_size_t), ("PriorityClass", wintypes.DWORD),
+                    ("SchedulingClass", wintypes.DWORD)]
+
+    class IO(ctypes.Structure):
+        _fields_ = [(n, ctypes.c_uint64) for n in ("r", "w", "o", "rb", "wb", "ob")]
+
+    class EXTENDED(ctypes.Structure):
+        _fields_ = [("Basic", BASIC), ("Io", IO), ("ProcessMemoryLimit", ctypes.c_size_t),
+                    ("JobMemoryLimit", ctypes.c_size_t), ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                    ("PeakJobMemoryUsed", ctypes.c_size_t)]
+
+    k32.CreateJobObjectW.restype = wintypes.HANDLE
+    k32.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+    k32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+    if _job is None:
+        job = k32.CreateJobObjectW(None, None)
+        info = EXTENDED()
+        info.Basic.LimitFlags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        k32.SetInformationJobObject(job, 9, ctypes.byref(info), ctypes.sizeof(info))
+        _job = job
+    k32.AssignProcessToJobObject(_job, int(proc._handle))
+
+
+def free_gb(path: Path) -> float:
+    path.mkdir(parents=True, exist_ok=True)
+    return shutil.disk_usage(path).free / 1e9
+
+
+def recover_parts(log=print):
+    """Finish recordings left half-written by a crash (fragmented mp4 is still readable)."""
+    exe = config.ffmpeg_path()
+    d = config.rec_dir()
+    if not exe or not d.exists():
+        return
+    for part in d.glob("*.part.mp4"):
+        final = part.with_name(part.name.replace(".part.mp4", ".mp4"))
+        r = subprocess.run([exe, "-hide_banner", "-loglevel", "error", "-y", "-i", str(part), "-c", "copy",
+                            "-movflags", "+faststart", str(final)], capture_output=True, creationflags=NO_WINDOW)
+        if r.returncode == 0:
+            part.unlink(missing_ok=True)
+            log(f"途中で止まった録画を復元しました: {final.name}")
+
+
+def frame_is_black(video: Path, at: float):
+    """Decode one frame and check whether it is (almost) black. None = could not check."""
+    exe = config.ffmpeg_path()
+    flags = (BELOW_NORMAL | NO_WINDOW) if sys.platform == "win32" else 0
+    try:
+        r = subprocess.run([exe, "-hide_banner", "-loglevel", "error", "-ss", f"{at:.1f}", "-i", str(video),
+                            "-frames:v", "1", "-vf", "scale=160:-2", "-f", "image2pipe", "-vcodec", "png", "-"],
+                           capture_output=True, timeout=20, creationflags=flags)
+        if r.returncode != 0 or not r.stdout:
+            return None
+        import io
+        from PIL import Image, ImageStat
+        img = Image.open(io.BytesIO(r.stdout)).convert("L")
+        return ImageStat.Stat(img).mean[0] < 6
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+
+
+def league_window_mode():
+    """0 = fullscreen (cannot be captured reliably), 1 = windowed, 2 = borderless. None = unknown."""
+    import re
+    from .lcu import _install_dirs
+    for d in _install_dirs():
+        try:
+            text = (d / "Config" / "game.cfg").read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        m = re.search(r"^WindowMode\s*=\s*(\d)", text, re.M)
+        if m:
+            return int(m.group(1))
+    return None
 
 
 def _live(path):
@@ -77,10 +174,15 @@ class Recording:
         cmd = [exe, "-hide_banner", "-loglevel", "error", "-y",
                "-f", "lavfi", "-i", f"ddagrab=output_idx={monitor}:framerate={fps}:draw_mouse={cursor}",
                *encoder_args(enc), "-g", str(fps * 2),
+               "-t", str(MAX_MINUTES * 60),             # hard upper limit, whatever happens
                "-movflags", "+frag_keyframe+empty_moov",  # stays playable even if the PC crashes
                str(self.tmp)]
         self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE,
                                      creationflags=(BELOW_NORMAL | NO_WINDOW) if sys.platform == "win32" else 0)
+        try:
+            _bind_to_job(self.proc)
+        except Exception:
+            pass
         self.offset = None
         self.items = []  # [[game_time, [itemIDs]]] snapshots of my inventory (client data has no purchase log)
 
@@ -117,7 +219,7 @@ class Recording:
             self.tmp.unlink(missing_ok=True)
             return None, err.strip()
         # remux to a normal mp4 (fast, no re-encode) so browsers seek smoothly
-        exe = shutil.which("ffmpeg")
+        exe = config.ffmpeg_path()
         r = subprocess.run([exe, "-hide_banner", "-loglevel", "error", "-y", "-i", str(self.tmp),
                             "-c", "copy", "-movflags", "+faststart", str(self.path)], capture_output=True,
                            creationflags=NO_WINDOW)
@@ -126,6 +228,11 @@ class Recording:
         else:
             self.tmp.rename(self.path)
         return self.path, ""
+
+
+def _check_black(rec, alert):
+    if frame_is_black(rec.tmp, 15) and frame_is_black(rec.tmp, 20):
+        alert(t("n.black"), t("n.fullscreen_msg"))
 
 
 def sidecar(video: Path) -> Path:
@@ -144,16 +251,17 @@ def cleanup(keep: int):
 
 def check_ready():
     """Return (ffmpeg_path, encoder) or raise RuntimeError with a user-facing message."""
-    exe = shutil.which("ffmpeg")
+    exe = config.ffmpeg_path()
     if not exe:
-        raise RuntimeError("ffmpeg が見つかりません。コマンドプロンプトで「winget install Gyan.FFmpeg」を実行してから、アプリを起動し直してください。")
+        raise RuntimeError("ffmpeg が見つかりません。")
     enc = pick_encoder(exe)
     if not enc:
         raise RuntimeError("GPUエンコーダー（NVENC/AMF/QSV）が使えないため、軽量録画ができません。")
     return exe, enc
 
 
-def run(after_game=None, poll=4, stop=None, enabled=lambda: True, log=print, on_state=lambda s: None):
+def run(after_game=None, poll=4, stop=None, enabled=lambda: True, log=print, on_state=lambda s: None,
+        alert=lambda title, msg: None):
     """Main loop. after_game(video_path, info) is called after each recorded game.
 
     stop: threading.Event to end the loop (an ongoing recording is finalized cleanly).
@@ -163,6 +271,7 @@ def run(after_game=None, poll=4, stop=None, enabled=lambda: True, log=print, on_
     import threading
     stop = stop or threading.Event()
     exe, enc = check_ready()
+    recover_parts(log)
     log(f"録画待機中（{enc}）。LoLの試合が始まると自動で録画します。")
     on_state("waiting")
     while not stop.is_set():
@@ -177,6 +286,12 @@ def run(after_game=None, poll=4, stop=None, enabled=lambda: True, log=print, on_
         name = player_name()
         if not name:  # spectating / replay
             stop.wait(15)
+            continue
+        free = free_gb(config.rec_dir())
+        if free < MIN_FREE_GB:
+            alert(t("n.low_disk"), t("n.low_disk_msg", free=free, need=MIN_FREE_GB))
+            while game_time() is not None and not stop.is_set():  # skip this game
+                stop.wait(10)
             continue
         rec = Recording(exe, enc)
         stop.wait(1.5)
@@ -198,6 +313,11 @@ def run(after_game=None, poll=4, stop=None, enabled=lambda: True, log=print, on_
                 tick += 1
                 if tick % 3 == 0:  # every ~15 s
                     rec.snapshot_items(name)
+                if tick == 5:  # ~25 s in: make sure we are not recording a black screen
+                    threading.Thread(target=_check_black, args=(rec, alert), daemon=True).start()
+                if tick % 12 == 0 and free_gb(config.rec_dir()) < STOP_FREE_GB:
+                    alert(t("n.disk_stop"), t("n.disk_stop_msg"))
+                    break
         on_state("processing")
         path, err = rec.stop()
         if not path:

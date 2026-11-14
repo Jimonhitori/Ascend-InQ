@@ -105,6 +105,7 @@ DEFAULTS = {
     "auto_review": True,
     "open_viewer": True,
     "notify": True,
+    "language": "auto",      # "auto" / "ja" / "en"
 }
 
 
@@ -120,6 +121,17 @@ def settings() -> dict:
 def save_settings(s: dict):
     SETTINGS_PATH.write_text(json.dumps({k: s[k] for k in DEFAULTS if k in s}, ensure_ascii=False, indent=1),
                              encoding="utf-8")
+
+
+TOOLS_DIR = ROOT / "tools"
+
+
+def ffmpeg_path() -> str | None:
+    """ffmpeg downloaded by the app (tools/) takes priority over one on PATH."""
+    local = TOOLS_DIR / ("ffmpeg.exe" if sys.platform == "win32" else "ffmpeg")
+    if local.exists():
+        return str(local)
+    return shutil.which("ffmpeg")
 
 
 def rec_dir() -> Path:

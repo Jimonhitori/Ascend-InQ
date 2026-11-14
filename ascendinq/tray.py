@@ -3,7 +3,6 @@
 Start it when you want to play, quit it from the tray menu when you're done.
 """
 import ctypes
-import json
 import logging
 import logging.handlers
 import os
@@ -15,18 +14,10 @@ from pathlib import Path
 import pystray
 
 from . import config, fetch, pipeline, recorder
+from .i18n import t
 from .icon import make_icon
 
 APP = "Ascend InQ"
-STATE_LABEL = {
-    "starting": "起動中…",
-    "waiting": "待機中（試合が始まると自動で録画）",
-    "recording": "● 録画中",
-    "processing": "試合データを分析中…",
-    "paused": "録画オフ",
-    "error": "エラー（ログを確認）",
-    "stopped": "停止",
-}
 
 
 def _single_instance() -> bool:
@@ -39,6 +30,12 @@ def _single_instance() -> bool:
 def _message(text):
     if sys.platform == "win32":
         ctypes.windll.user32.MessageBoxW(None, text, APP, 0x40)
+
+
+def _ask_yes_no(text) -> bool:
+    if sys.platform != "win32":
+        return False
+    return ctypes.windll.user32.MessageBoxW(None, text, APP, 0x04 | 0x20 | 0x40000) == 6  # YESNO|QUESTION|TOPMOST
 
 
 class TrayApp:
@@ -69,6 +66,9 @@ class TrayApp:
         except Exception:
             pass
 
+    def alert(self, title, msg):
+        self.notify(title, msg, important=True)
+
     def set_setting(self, key, value):
         s = config.settings()
         s[key] = value
@@ -80,10 +80,10 @@ class TrayApp:
             return
         self.state = s
         self.icon.icon = make_icon(s)
-        self.icon.title = f"{APP} — {STATE_LABEL.get(s, s)}"
+        self.icon.title = f"{APP} — {t('state.' + s)}"
         self.icon.update_menu()
         if s == "recording":
-            self.notify("録画を開始しました", "試合が終わると自動で止まります。")
+            self.notify(t("n.rec_started"), t("n.rec_started_msg"))
 
     def background(self, fn):
         threading.Thread(target=self._guard(fn), daemon=True).start()
@@ -93,28 +93,47 @@ class TrayApp:
             try:
                 fn()
             except Exception as e:
-                self.notify("エラー", str(e)[:200])
+                self.notify(t("n.error"), str(e)[:200], important=True)
         return run
 
     # ------------------------------------------------------------ recorder
     def after_game(self, video, info):
         if not config.settings()["auto_review"]:
-            self.notify("録画を保存しました", video.name)
+            self.notify(t("n.saved"), video.name)
             return
-        self.notify("録画を保存しました", "試合データがRiot APIに出たら分析します（1〜数分）。")
+        self.notify(t("n.saved"), t("n.saved_msg"))
         a, path = pipeline.review_after_game(video, info, config.riot_id(), self.log, self.stop)
         if a:
-            self.notify("振り返りの準備ができました", "次の試合で意識すること: " + a["focus"])
+            self.notify(t("n.ready"), t("n.focus") + a["focus"])
             if config.settings()["open_viewer"]:
                 os.startfile(path)
 
+    def ensure_ffmpeg(self) -> bool:
+        if config.ffmpeg_path():
+            return True
+        from . import ffmpeg_setup
+        if not _ask_yes_no(t("ff.ask", mb=ffmpeg_setup.APPROX_MB)):
+            self.alert(APP, t("ff.skipped"))
+            return False
+        self.notify(t("ff.downloading"), t("ff.progress", pct=0), important=True)
+        try:
+            ffmpeg_setup.download(lambda pct: self.log(t("ff.progress", pct=pct)))
+        except RuntimeError as e:
+            self.alert(t("n.error"), str(e))
+            return False
+        self.notify(t("ff.done"), "", important=True)
+        return True
+
     def recorder_loop(self):
+        if not self.ensure_ffmpeg():
+            self.set_state("error")
+            return
         try:
             recorder.run(self.after_game, stop=self.stop, enabled=lambda: config.settings()["capture"] != "off",
-                         log=self.log, on_state=self.set_state)
+                         log=self.log, on_state=self.set_state, alert=self.alert)
         except RuntimeError as e:
             self.set_state("error")
-            self.notify("録画を開始できません", str(e), important=True)
+            self.alert(t("n.cannot_record"), str(e))
 
     # ------------------------------------------------------------ menu actions
     def toggle_record(self, icon, item):
@@ -128,7 +147,7 @@ class TrayApp:
         if p:
             os.startfile(p)
         else:
-            self.notify("まだ試合がありません", "「直近の試合を取り込む」を実行するか、1試合プレイしてください。")
+            self.notify(t("n.no_games"), t("n.no_games_msg"), important=True)
 
     def open_index(self, icon=None, item=None):
         p = config.REPORT_DIR / "index.html"
@@ -140,13 +159,13 @@ class TrayApp:
     def import_recent(self, icon=None, item=None):
         def work():
             if config.settings()["source"] == "api" and not config.riot_id():
-                raise RuntimeError("設定画面で自分の Riot ID を入力してください。")
-            self.notify("取り込み中", "直近5試合を読み込んでいます…")
+                raise RuntimeError(t("n.need_riot_id"))
+            self.notify(t("n.importing"), t("n.importing_msg"))
             riot_id, puuid, ids, new = pipeline.import_recent(5, self.log)
             for mid in ids:
                 pipeline.build(mid, puuid)
             idx = pipeline.refresh_index(riot_id, puuid)
-            self.notify("取り込み完了", f"{riot_id}: 新しく {len(new)} 試合を取り込みました。")
+            self.notify(t("n.imported"), t("n.imported_msg", rid=riot_id, n=len(new)))
             if idx:
                 os.startfile(idx)
         self.background(work)
@@ -170,7 +189,7 @@ class TrayApp:
     def quit(self, icon, item):
         self.stop.set()
         if self.state == "recording":
-            self.notify("終了中", "録画を保存してから終了します…")
+            self.notify(t("n.quitting"), t("n.quitting_msg"))
         if self.worker:
             self.worker.join(timeout=40)
         icon.stop()
@@ -178,19 +197,21 @@ class TrayApp:
     def _menu(self):
         Item, Menu = pystray.MenuItem, pystray.Menu
         return Menu(
-            Item(lambda item: STATE_LABEL.get(self.state, self.state), None, enabled=False),
+            Item(lambda item: t("state." + self.state), None, enabled=False),
             Menu.SEPARATOR,
-            Item("最新の試合を見る", self.open_latest, default=True),
-            Item("試合一覧を開く", self.open_index),
-            Item("直近の試合を取り込む", self.import_recent),
+            Item(lambda item: t("menu.latest"), self.open_latest, default=True),
+            Item(lambda item: t("menu.index"), self.open_index),
+            Item(lambda item: t("menu.import"), self.import_recent),
             Menu.SEPARATOR,
-            Item("自動録画", self.toggle_record, checked=lambda item: config.settings()["capture"] != "off"),
-            Item("試合後にビューアを開く", self.toggle_open, checked=lambda item: config.settings()["open_viewer"]),
-            Item("録画フォルダを開く", self.open_folder(config.rec_dir)),
-            Item("設定…", self.open_settings),
-            Item("ログを開く", self.open_folder(config.ROOT / "logs")),
+            Item(lambda item: t("menu.record"), self.toggle_record,
+                 checked=lambda item: config.settings()["capture"] != "off"),
+            Item(lambda item: t("menu.open_viewer"), self.toggle_open,
+                 checked=lambda item: config.settings()["open_viewer"]),
+            Item(lambda item: t("menu.rec_folder"), self.open_folder(config.rec_dir)),
+            Item(lambda item: t("menu.settings"), self.open_settings),
+            Item(lambda item: t("menu.logs"), self.open_folder(config.ROOT / "logs")),
             Menu.SEPARATOR,
-            Item("終了", self.quit),
+            Item(lambda item: t("menu.quit"), self.quit),
         )
 
     # ------------------------------------------------------------ start
@@ -205,10 +226,12 @@ class TrayApp:
             except config.ConfigError:
                 first = True
         if first:
-            self.notify("初期設定", "設定画面を開きました。録画の保存先などを確認して保存してください。", important=True)
+            self.notify(t("n.first_run"), t("n.first_run_msg"), important=True)
             self.open_settings()
         else:
-            self.notify(APP, "起動しました。LoLの試合が始まると自動で録画します。")
+            self.notify(APP, t("n.started"))
+        if recorder.league_window_mode() == 0 and config.settings()["capture"] != "off":
+            self.alert(t("n.fullscreen"), t("n.fullscreen_msg"))
         self.worker = threading.Thread(target=self.recorder_loop, daemon=True)
         self.worker.start()
 
@@ -225,8 +248,8 @@ def selftest() -> int:
         riot_id, puuid = pipeline.last_account()
         puuid = puuid or pipeline.puuid_for(riot_id)
         mid = next(m for m in fetch.cached_match_ids()
-                   if any(p["puuid"] == puuid for p in fetch.load_match(m)[0]["info"]["participants"]))
-        a, _ = pipeline.build(mid, puuid)
+                   if pipeline.my_puuid(fetch.load_match(m)[0], puuid, riot_id))
+        a, _ = pipeline.build(mid, puuid, riot_id=riot_id)
         out.write_text(f"OK {mid} {pipeline.viewer_path(mid).exists()} {a['focus']}", encoding="utf-8")
         return 0
     except Exception as e:
@@ -242,6 +265,6 @@ def main():
         open_window()
         return
     if not _single_instance():
-        _message("Ascend InQ はすでに起動しています。画面右下のタスクトレイ（^ の中）を確認してください。")
+        _message(t("n.already_running"))
         return
     TrayApp().run()
