@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 import threading
+from pathlib import Path
 
 import pystray
 
@@ -26,7 +27,6 @@ STATE_LABEL = {
     "error": "エラー（ログを確認）",
     "stopped": "停止",
 }
-SETTINGS = config.DATA_DIR / "app.json"
 
 
 def _single_instance() -> bool:
@@ -53,11 +53,6 @@ class TrayApp:
 
         self.stop = threading.Event()
         self.state = "starting"
-        self.settings = {"record": True, "open_viewer": True}
-        try:
-            self.settings.update(json.loads(SETTINGS.read_text(encoding="utf-8")))
-        except (OSError, ValueError):
-            pass
         self.icon = pystray.Icon("AscendInQ", make_icon("starting"), APP, menu=self._menu())
         self.worker = None
 
@@ -65,16 +60,20 @@ class TrayApp:
     def log(self, msg):
         self.logger.info(msg)
 
-    def notify(self, title, msg):
+    def notify(self, title, msg, important=False):
         self.log(f"{title}: {msg}")
+        if not important and not config.settings()["notify"]:
+            return
         try:
             self.icon.notify(msg, title)
         except Exception:
             pass
 
-    def save_settings(self):
-        config.DATA_DIR.mkdir(parents=True, exist_ok=True)
-        SETTINGS.write_text(json.dumps(self.settings), encoding="utf-8")
+    def set_setting(self, key, value):
+        s = config.settings()
+        s[key] = value
+        config.save_settings(s)
+        self.icon.update_menu()
 
     def set_state(self, s):
         if s == self.state:
@@ -99,30 +98,30 @@ class TrayApp:
 
     # ------------------------------------------------------------ recorder
     def after_game(self, video, info):
+        if not config.settings()["auto_review"]:
+            self.notify("録画を保存しました", video.name)
+            return
         self.notify("録画を保存しました", "試合データがRiot APIに出たら分析します（1〜数分）。")
         a, path = pipeline.review_after_game(video, info, config.riot_id(), self.log, self.stop)
         if a:
             self.notify("振り返りの準備ができました", "次の試合で意識すること: " + a["focus"])
-            if self.settings["open_viewer"]:
+            if config.settings()["open_viewer"]:
                 os.startfile(path)
 
     def recorder_loop(self):
         try:
-            recorder.run(self.after_game, stop=self.stop, enabled=lambda: self.settings["record"],
+            recorder.run(self.after_game, stop=self.stop, enabled=lambda: config.settings()["capture"] != "off",
                          log=self.log, on_state=self.set_state)
         except RuntimeError as e:
             self.set_state("error")
-            self.notify("録画を開始できません", str(e))
+            self.notify("録画を開始できません", str(e), important=True)
 
     # ------------------------------------------------------------ menu actions
     def toggle_record(self, icon, item):
-        self.settings["record"] = not self.settings["record"]
-        self.save_settings()
-        icon.update_menu()
+        self.set_setting("capture", "off" if config.settings()["capture"] != "off" else "match")
 
     def toggle_open(self, icon, item):
-        self.settings["open_viewer"] = not self.settings["open_viewer"]
-        self.save_settings()
+        self.set_setting("open_viewer", not config.settings()["open_viewer"])
 
     def open_latest(self, icon=None, item=None):
         p = pipeline.latest_viewer()
@@ -140,28 +139,33 @@ class TrayApp:
 
     def import_recent(self, icon=None, item=None):
         def work():
-            riot_id = config.riot_id() if config.riot_id() != "Name#JP1" else ""
-            if not riot_id:
-                raise RuntimeError("設定（.env）の RIOT_ID に自分の Riot ID を書いてください。")
-            self.notify("取り込み中", f"{riot_id} の直近5試合を取得しています…")
-            puuid, ids, new = fetch.fetch_recent(pipeline.client(), riot_id, 5)
+            if config.settings()["source"] == "api" and not config.riot_id():
+                raise RuntimeError("設定画面で自分の Riot ID を入力してください。")
+            self.notify("取り込み中", "直近5試合を読み込んでいます…")
+            riot_id, puuid, ids, new = pipeline.import_recent(5, self.log)
             for mid in ids:
                 pipeline.build(mid, puuid)
             idx = pipeline.refresh_index(riot_id, puuid)
-            self.notify("取り込み完了", f"新しく {len(new)} 試合を取り込みました。")
+            self.notify("取り込み完了", f"{riot_id}: 新しく {len(new)} 試合を取り込みました。")
             if idx:
                 os.startfile(idx)
         self.background(work)
 
-    def open_folder(self, path):
+    def open_folder(self, target):
         def action(icon=None, item=None):
+            path = target() if callable(target) else target
             path.mkdir(parents=True, exist_ok=True)
             os.startfile(path)
         return action
 
     def open_settings(self, icon=None, item=None):
+        """The settings window runs as its own process so Tk never shares a thread with the tray."""
         config.ensure_env()
-        subprocess.Popen(["notepad.exe", str(config.ENV_PATH)])
+        if config.FROZEN:
+            cmd = [sys.executable, "--settings"]
+        else:
+            cmd = [str(Path(sys.executable).with_name("pythonw.exe")), str(config.ROOT / "app.py"), "--settings"]
+        subprocess.Popen(cmd, cwd=str(config.ROOT))
 
     def quit(self, icon, item):
         self.stop.set()
@@ -180,10 +184,10 @@ class TrayApp:
             Item("試合一覧を開く", self.open_index),
             Item("直近の試合を取り込む", self.import_recent),
             Menu.SEPARATOR,
-            Item("自動録画", self.toggle_record, checked=lambda item: self.settings["record"]),
-            Item("試合後にビューアを開く", self.toggle_open, checked=lambda item: self.settings["open_viewer"]),
-            Item("録画フォルダを開く", self.open_folder(config.REC_DIR)),
-            Item("設定（APIキー・Riot ID）", self.open_settings),
+            Item("自動録画", self.toggle_record, checked=lambda item: config.settings()["capture"] != "off"),
+            Item("試合後にビューアを開く", self.toggle_open, checked=lambda item: config.settings()["open_viewer"]),
+            Item("録画フォルダを開く", self.open_folder(config.rec_dir)),
+            Item("設定…", self.open_settings),
             Item("ログを開く", self.open_folder(config.ROOT / "logs")),
             Menu.SEPARATOR,
             Item("終了", self.quit),
@@ -194,13 +198,14 @@ class TrayApp:
         icon.visible = True
         created = config.ensure_env()
         config.reload()
-        try:
-            config.api_key()
-            first = created
-        except config.ConfigError:
-            first = True
+        first = created
+        if config.settings()["source"] == "api":
+            try:
+                config.api_key()
+            except config.ConfigError:
+                first = True
         if first:
-            self.notify("初期設定", "メモ帳で開いた設定に、Riot APIキーと自分のRiot IDを書いて保存してください。")
+            self.notify("初期設定", "設定画面を開きました。録画の保存先などを確認して保存してください。", important=True)
             self.open_settings()
         else:
             self.notify(APP, "起動しました。LoLの試合が始まると自動で録画します。")
@@ -217,8 +222,8 @@ def selftest() -> int:
     out = config.ROOT / "logs" / "selftest.txt"
     try:
         recorder.check_ready()
-        riot_id = config.riot_id()
-        puuid = pipeline.puuid_for(riot_id)
+        riot_id, puuid = pipeline.last_account()
+        puuid = puuid or pipeline.puuid_for(riot_id)
         mid = next(m for m in fetch.cached_match_ids()
                    if any(p["puuid"] == puuid for p in fetch.load_match(m)[0]["info"]["participants"]))
         a, _ = pipeline.build(mid, puuid)
@@ -232,6 +237,10 @@ def selftest() -> int:
 def main():
     if "--selftest" in sys.argv:
         sys.exit(selftest())
+    if "--settings" in sys.argv:
+        from .settings_window import open_window
+        open_window()
+        return
     if not _single_instance():
         _message("Ascend InQ はすでに起動しています。画面右下のタスクトレイ（^ の中）を確認してください。")
         return

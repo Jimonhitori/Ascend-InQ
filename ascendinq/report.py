@@ -60,7 +60,7 @@ def to_markdown(a) -> str:
             jg = "**本人が参加**" if d["jg_involved"] else f"{d['ejg_zone_20s']} (距離{d['ejg_dist_20s']})"
             L.append(f"| {n} | {mmss(d['t'])} | {d['zone']} | {d['killer']}"
                      f"{' + ' + '/'.join(d['assists']) if d['assists'] else ''} | {d['n_enemies']} | {jg} "
-                     f"| {d['my_wards_3min']} | {'/'.join(d['allies_near']) or 'なし'} | {'/'.join(d['lost_after']) or '-'} |")
+                     f"| {'-' if d['my_wards_3min'] is None else d['my_wards_3min']} | {'/'.join(d['allies_near']) or 'なし'} | {'/'.join(d['lost_after']) or '-'} |")
         for n, d in enumerate(a["deaths"], 1):
             video, stills = _clip_files(a["match_id"], n)
             if video or stills:
@@ -82,10 +82,14 @@ def to_markdown(a) -> str:
         L += ["", "タワー: " + "、".join(
             f"{mmss(t['t'])} {'敵' if t['ours'] else '味方'}{t['lane']}{t['tier']}{'(関与)' if t['involved'] else ''}"
             for t in a["towers"])]
-    L += [f"", f"MIDのタワープレート: 取った {a['mid_plates']['ours']} / 取られた {a['mid_plates']['theirs']}"]
+    if a.get("mid_plates"):
+        L += ["", f"MIDのタワープレート: 取った {a['mid_plates']['ours']} / 取られた {a['mid_plates']['theirs']}"]
 
     L += ["", "## アイテム完成", ""]
-    L += [f"- {mmss(i['t'])} {i['name']}{'（靴）' if i['kind'] == 'boots' else ''}" for i in a["items"]] or ["なし"]
+    if a["items"] and a["items"][0]["t"] is None:
+        L.append("（完成時刻のデータが無いため、最終ビルドのみ）")
+    L += [f"- {mmss(i['t']) if i['t'] is not None else ''} {i['name']}{'（靴）' if i['kind'] == 'boots' else ''}"
+          for i in a["items"]] or ["なし"]
 
     if a["me"]["role"] == "MIDDLE":
         L += ["", "## ローム（15分まで、MID以外でのキル関与）", "",

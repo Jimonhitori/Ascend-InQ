@@ -13,7 +13,8 @@ MIT License で公開している OSS。個人用の情報は `CLAUDE.local.md`�
 - `app.py` → `ascendinq/tray.py` — タスクトレイアプリ（.exe の本体）。`build.bat` で PyInstaller ビルド、`--selftest` で動作確認
 - `review.py` — CLI（fetch / view / record / report / clip）
 - `ascendinq/pipeline.py` — CLI とトレイアプリ共通の処理（取得→分析→ビューア作成、試合後の自動レビュー）
-- `ascendinq/riot.py` — Riot API クライアント（レート制限 20/1s・100/2min、429 は Retry-After、401/403 は失効メッセージ）
+- `ascendinq/lcu.py` — LoL クライアント（LCU）から試合履歴・タイムラインを読み、Match-V5 形式に変換（既定のデータ取得元・キー不要）。クライアントのタイムラインには WARD_PLACED / ITEM_PURCHASED / TURRET_PLATE_DESTROYED が無い
+- `ascendinq/riot.py` — Riot API クライアント（任意。設定で source=api のとき）（レート制限 20/1s・100/2min、429 は Retry-After、401/403 は失効メッセージ）
 - `ascendinq/fetch.py` — Riot ID → PUUID → ソロランク（queue=420）の試合とタイムラインを `data/` に保存
 - `ascendinq/analyze.py` — 1試合の分析（デス・レーン差・オブジェクト・アイテム・ローム）と改善点ルール
 - `ascendinq/report.py` — `reports/` に Markdown / HTML / 一覧
@@ -25,3 +26,4 @@ MIT License で公開している OSS。個人用の情報は `CLAUDE.local.md`�
 - キーは `.env` の `RIOT_API_KEY`。コード・ログ・チャットに出さない
 - ルーティング: Account-V1 / Match-V5 は `REGION`（既定 asia）、プラットフォームは `PLATFORM`（既定 jp1）
 - Riot API にワードの設置位置は無い。位置は1分ごとのフレーム＋イベントからの推定
+- 同じアカウントでも PUUID は Riot API（キーごとに暗号化）とクライアントで異なる。`pipeline.my_puuid` で名前から補う

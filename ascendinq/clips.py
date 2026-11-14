@@ -46,7 +46,7 @@ def video_offset(video: Path, game_start_ms: int) -> float:
 
 
 def default_video_dirs():
-    dirs = [config.ROOT / "recordings"]
+    dirs = [config.rec_dir()]
     folder = config.video_dir()
     if folder:
         return dirs + [folder]
@@ -71,7 +71,7 @@ def _find_in(game_start_ms: int, folder: Path, recursive: bool) -> Path | None:
         if p.suffix.lower() not in VIDEO_EXT or not p.is_file() or ".part." in p.name:
             continue
         gap = game_start - video_start_epoch(p)  # recording should start a bit before the game
-        if -60 <= gap <= 20 * 60 and (best_gap is None or gap < best_gap):
+        if -300 <= gap <= 20 * 60 and (best_gap is None or gap < best_gap):
             best, best_gap = p, gap
     return best
 

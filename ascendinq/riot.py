@@ -43,8 +43,9 @@ class RateLimiter:
 
 
 class RiotClient:
-    def __init__(self, api_key: str, region: str = "asia", platform: str = "jp1"):
+    def __init__(self, api_key: str, region: str = "asia", platform: str = "jp1", account_region: str | None = None):
         self.region_url = f"https://{region}.api.riotgames.com"
+        self.account_url = f"https://{account_region or region}.api.riotgames.com"
         self.platform_url = f"https://{platform}.api.riotgames.com"
         self.session = requests.Session()
         self.session.headers["X-Riot-Token"] = api_key
@@ -82,7 +83,7 @@ class RiotClient:
 
     def account_by_riot_id(self, game_name: str, tag: str) -> dict:
         return self._get(
-            f"{self.region_url}/riot/account/v1/accounts/by-riot-id/"
+            f"{self.account_url}/riot/account/v1/accounts/by-riot-id/"
             f"{quote(game_name, safe='')}/{quote(tag, safe='')}"
         )
 

@@ -22,7 +22,6 @@ from . import config
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 LIVE = "https://127.0.0.1:2999/liveclientdata"
-REC_DIR = config.REC_DIR
 BELOW_NORMAL = 0x00004000
 NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0  # no console flash from the tray app
 MAX_MINUTES = 90
@@ -56,7 +55,7 @@ def pick_encoder(exe):
 
 
 def encoder_args(enc):
-    quality = os.getenv("RECORD_QUALITY", "30")  # lower = better quality, bigger file
+    quality = str(config.QUALITY.get(config.settings()["quality"], config.QUALITY["standard"])[1])
     if enc == "h264_nvenc":
         return ["-c:v", enc, "-preset", "p4", "-rc", "vbr", "-cq", quality, "-b:v", "0", "-maxrate", "8M", "-bufsize", "16M"]
     if enc == "h264_amf":
@@ -66,21 +65,37 @@ def encoder_args(enc):
 
 class Recording:
     def __init__(self, exe, enc):
-        REC_DIR.mkdir(parents=True, exist_ok=True)
+        s = config.settings()
+        rec_dir = config.rec_dir()
+        rec_dir.mkdir(parents=True, exist_ok=True)
         self.start = time.time()
         stamp = dt.datetime.fromtimestamp(self.start).strftime("%Y-%m-%d %H-%M-%S")
-        self.tmp = REC_DIR / f"{stamp}.part.mp4"
-        self.path = REC_DIR / f"{stamp}.mp4"
-        monitor = os.getenv("RECORD_MONITOR", "0")
-        fps = os.getenv("RECORD_FPS", "30")
+        self.tmp = rec_dir / f"{stamp}.part.mp4"
+        self.path = rec_dir / f"{stamp}.mp4"
+        monitor, fps = int(s["monitor"]), int(s["fps"])
+        cursor = 1 if s["cursor"] else 0
         cmd = [exe, "-hide_banner", "-loglevel", "error", "-y",
-               "-f", "lavfi", "-i", f"ddagrab=output_idx={monitor}:framerate={fps}:draw_mouse=1",
-               *encoder_args(enc), "-g", str(int(fps) * 2),
+               "-f", "lavfi", "-i", f"ddagrab=output_idx={monitor}:framerate={fps}:draw_mouse={cursor}",
+               *encoder_args(enc), "-g", str(fps * 2),
                "-movflags", "+frag_keyframe+empty_moov",  # stays playable even if the PC crashes
                str(self.tmp)]
         self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE,
                                      creationflags=(BELOW_NORMAL | NO_WINDOW) if sys.platform == "win32" else 0)
         self.offset = None
+        self.items = []  # [[game_time, [itemIDs]]] snapshots of my inventory (client data has no purchase log)
+
+    def snapshot_items(self, player):
+        """One small localhost request; records my inventory when it changes."""
+        lst, gt = _live("playerlist"), game_time()
+        if not isinstance(lst, list) or gt is None:
+            return
+        me = next((p for p in lst if p.get("riotId") == player or p.get("summonerName") == player
+                   or f"{p.get('riotIdGameName')}#{p.get('riotIdTagLine')}" == player), None)
+        if not me:
+            return
+        ids = sorted(i.get("itemID", 0) for i in me.get("items", []))
+        if not self.items or self.items[-1][1] != ids:
+            self.items.append([round(gt, 1), ids])
 
     def sync(self):
         """offset = seconds into the video where the in-game clock reads 0:00."""
@@ -120,7 +135,7 @@ def sidecar(video: Path) -> Path:
 def cleanup(keep: int):
     if keep <= 0:
         return
-    vids = sorted(REC_DIR.glob("*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
+    vids = sorted(config.rec_dir().glob("*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
     for old in vids[keep:]:
         old.unlink(missing_ok=True)
         sidecar(old).unlink(missing_ok=True)
@@ -148,7 +163,6 @@ def run(after_game=None, poll=4, stop=None, enabled=lambda: True, log=print, on_
     import threading
     stop = stop or threading.Event()
     exe, enc = check_ready()
-    keep = int(os.getenv("RECORD_KEEP", "30"))
     log(f"録画待機中（{enc}）。LoLの試合が始まると自動で録画します。")
     on_state("waiting")
     while not stop.is_set():
@@ -170,6 +184,7 @@ def run(after_game=None, poll=4, stop=None, enabled=lambda: True, log=print, on_
         on_state("recording")
         log(f"[{dt.datetime.now():%H:%M}] 試合を検知 → 録画開始（{name}） {rec.path.name}")
         misses = 0
+        tick = 0
         while rec.alive() and time.time() - rec.start < MAX_MINUTES * 60 and not stop.is_set():
             stop.wait(5)
             if game_time() is None:
@@ -180,16 +195,19 @@ def run(after_game=None, poll=4, stop=None, enabled=lambda: True, log=print, on_
                 misses = 0
                 if rec.offset is None:
                     rec.sync()
+                tick += 1
+                if tick % 3 == 0:  # every ~15 s
+                    rec.snapshot_items(name)
         on_state("processing")
         path, err = rec.stop()
         if not path:
             log(f"録画に失敗しました: {err[:300]}")
             continue
-        info = {"start_epoch": rec.start, "offset": rec.offset, "player": name}
+        info = {"start_epoch": rec.start, "offset": rec.offset, "player": name, "items": rec.items}
         sidecar(path).write_text(json.dumps(info, ensure_ascii=False), encoding="utf-8")
         size = path.stat().st_size / 1e9
         log(f"[{dt.datetime.now():%H:%M}] 録画終了: {path.name}（{size:.1f} GB）")
-        cleanup(keep)
+        cleanup(int(config.settings()["keep"]))
         if after_game and not stop.is_set():
             try:
                 after_game(path, info)

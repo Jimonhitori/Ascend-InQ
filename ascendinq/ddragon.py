@@ -66,3 +66,8 @@ def is_completed_item(item_id: int) -> str | None:
     if not it.get("into") and it.get("from") and gold.get("total", 0) >= 2200:
         return "legendary"
     return None
+
+
+def champion_ids() -> dict:
+    """{numeric champion id: champion id string} e.g. {34: 'Anivia'}."""
+    return {int(v["key"]): k for k, v in _fetch_json("champion", "en_US").items()}

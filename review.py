@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 from ascendinq import clips, config, fetch, pipeline, report
+from ascendinq.lcu import ClientNotRunning
 from ascendinq.riot import RiotAPIError
 
 
@@ -20,11 +21,13 @@ puuid_for, build, viewer_path = pipeline.puuid_for, pipeline.build, pipeline.vie
 
 
 def cmd_fetch(args):
-    client = pipeline.client()
-    print(f"{args.id} の直近{args.n}試合（ソロランク）を確認中…")
-    puuid, ids, new = fetch.fetch_recent(client, args.id, args.n)
+    if args.id and args.id != config.riot_id():
+        os.environ["RIOT_ID"] = args.id
+    src = "Riot API" if config.settings()["source"] == "api" else "LoL クライアント"
+    print(f"{src} から直近{args.n}試合を確認中…")
+    riot_id, puuid, ids, new = pipeline.import_recent(args.n)
     if not ids:
-        print("ソロランクの試合が見つかりませんでした。")
+        print("試合が見つかりませんでした。")
         return
     print(f"新しく取得: {len(new)} 試合")
     analyses = []
@@ -117,7 +120,7 @@ def main():
     args = ap.parse_args(argv)
     try:
         {"fetch": cmd_fetch, "report": cmd_report, "clip": cmd_clip, "view": cmd_view, "record": cmd_record}[args.cmd](args)
-    except (config.ConfigError, RiotAPIError, FileNotFoundError, ValueError, RuntimeError) as e:
+    except (config.ConfigError, RiotAPIError, ClientNotRunning, FileNotFoundError, ValueError, RuntimeError) as e:
         sys.exit(f"エラー: {e}")
     except KeyboardInterrupt:
         print("終了しました。")

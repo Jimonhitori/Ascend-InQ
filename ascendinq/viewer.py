@@ -62,7 +62,8 @@ def death_moment(n, d, a):
         facts.append(f"レベル {d['level']} vs 対面 {d['opp_level']}")
     if d.get("lane_gold_diff") is not None:
         facts.append(f"対面とのゴールド差 {d['lane_gold_diff']:+}")
-    facts.append(f"直前3分の自分のワード {d['my_wards_3min']}個")
+    if d["my_wards_3min"] is not None:
+        facts.append(f"直前3分の自分のワード {d['my_wards_3min']}個")
     facts.append(f"復活まで約{d['respawn_est']}秒（推定）")
     if d["lost_after"]:
         facts.append("このデス中に取られた: " + "・".join(d["lost_after"]))
@@ -164,6 +165,8 @@ def build_moments(a, match, timeline):
                         "sub": "", "facts": [], "advice": [], "jump": max(0, tw["t"] - 20), "ours": tw["ours"]})
 
     for it in a["items"]:
+        if it["t"] is None:
+            continue
         moments.append({"t": it["t"], "kind": "item", "icon": "🛒", "severity": 0,
                         "title": f"{it['name']} 完成", "sub": "", "facts": [], "advice": [], "jump": max(0, it["t"] - 5)})
 

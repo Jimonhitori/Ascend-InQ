@@ -176,6 +176,9 @@ def analyze(match: dict, timeline: dict, puuid: str) -> dict:
 
     pos = Positions(timeline)
     events = list(all_events(timeline))
+    has_wards = any(e["type"] == "WARD_PLACED" for e in events)
+    has_items = any(e["type"] == "ITEM_PURCHASED" for e in events)
+    has_plates = any(e["type"] == "TURRET_PLATE_DESTROYED" for e in events)
     champ_ja = lambda pid: by_id[pid]["champ_ja"] if pid in by_id else "ミニオン/タワー"
 
     # ------------------------------------------------ objectives (needed by deaths)
@@ -227,8 +230,9 @@ def analyze(match: dict, timeline: dict, puuid: str) -> dict:
         involved = [pid for pid in [killer] + assists if pid in by_id]
         jg_involved = bool(ejg and ejg["pid"] in involved)
         ejg_pos20 = pos.at(ejg["pid"], t - 20000) if ejg else None
-        my_wards = sum(1 for w in events if w["type"] == "WARD_PLACED" and w.get("creatorId") == my_id
-                       and t - 180000 <= w["timestamp"] <= t and w.get("wardType") not in (None, "UNDEFINED"))
+        my_wards = (sum(1 for w in events if w["type"] == "WARD_PLACED" and w.get("creatorId") == my_id
+                        and t - 180000 <= w["timestamp"] <= t and w.get("wardType") not in (None, "UNDEFINED"))
+                    if has_wards else None)  # None = ward data not available (client source)
         allies_near = [a["participantId"] for a in allies if dist(pos.at(a["participantId"], t), dpos) < NEAR]
         lvl = level_at(timeline, my_id, t)
         respawn = respawn_estimate(lvl, t / 1000)
@@ -306,6 +310,12 @@ def analyze(match: dict, timeline: dict, puuid: str) -> dict:
                 if items[i]["id"] == e["beforeId"]:
                     items.pop(i)
                     break
+    if not has_items:  # no purchase timeline (client source without live capture): final build only
+        for k in range(7):
+            iid = me_p.get(f"item{k}", 0)
+            kind = ddragon.is_completed_item(iid) if iid else None
+            if kind:
+                items.append({"t": None, "id": iid, "name": ddragon.item_name(iid), "kind": kind})
 
     # ------------------------------------------------ roams (before 15:00)
     def kill_list(pid):
@@ -348,7 +358,8 @@ def analyze(match: dict, timeline: dict, puuid: str) -> dict:
         "remake": me_p.get("gameEndedInEarlySurrender", False),
         "me": me, "opp": opp, "enemy_jg": ejg, "enemy_mid": emid,
         "stats": stats, "lane": lane, "deaths": deaths, "objectives": objectives,
-        "towers": towers, "mid_plates": plates, "items": items,
+        "towers": towers, "mid_plates": plates if has_plates else None, "items": items,
+        "data_missing": [k for k, ok in (("wards", has_wards), ("items", has_items), ("plates", has_plates)) if not ok],
         "roams_mine": roams_mine, "roams_enemy_mid": roams_enemy_mid,
     }
     if a["remake"] or duration < 6 * 60:
@@ -491,7 +502,7 @@ def find_issues(a):
                 "トリンケットが溜まったら必ず使い、帰還時にコントロールワードを買う。")
 
     # 10. first item timing
-    first = next((i for i in a["items"] if i["kind"] == "legendary"), None)
+    first = next((i for i in a["items"] if i["kind"] == "legendary" and i["t"] is not None), None)
     if first and role in ("MIDDLE", "TOP", "BOTTOM") and first["t"] > 14 * 60:
         add(1 + (first["t"] - 14 * 60) / 120, "1つ目のコアアイテムが遅い",
             f"{first['name']} 完成 {mmss(first['t'])}（目安 13〜14分以内）。",
