@@ -1,0 +1,456 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__ | Ascend InQ</title>
+<style>
+:root{
+  --bg:#0e1115;--panel:#161b21;--panel2:#1d232b;--line:#2a323c;--text:#e7e9ec;--muted:#8b95a1;
+  --gold:#c8aa6e;--blue:#4fa3ff;--red:#ff5d5d;--green:#43c59e;--warn:#ffb347;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
+  font-family:"Yu Gothic UI","Meiryo","Hiragino Sans",sans-serif;font-size:14px}
+button{font:inherit;color:inherit;background:var(--panel2);border:1px solid var(--line);border-radius:6px;
+  padding:5px 10px;cursor:pointer}
+button:hover{border-color:var(--gold)}
+button.on{background:var(--gold);color:#111;border-color:var(--gold)}
+.app{display:grid;grid-template-rows:auto 1fr auto;height:100vh}
+header{display:flex;align-items:center;gap:14px;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel)}
+.badge{padding:3px 10px;border-radius:4px;font-weight:bold}
+.badge.win{background:rgba(79,163,255,.18);color:var(--blue)}.badge.lose{background:rgba(255,93,93,.18);color:var(--red)}
+header h1{font-size:17px;margin:0}
+header .meta{color:var(--muted)}
+.brand{color:var(--gold)!important;font-weight:bold;letter-spacing:.04em}
+header .sp{flex:1}
+header a{color:var(--blue);text-decoration:none}
+.main{display:grid;grid-template-columns:1fr 360px;min-height:0}
+.stage{position:relative;display:flex;align-items:center;justify-content:center;background:#07090b;min-height:0;overflow:hidden}
+.stage video{max-width:100%;max-height:100%;display:block}
+.side{border-left:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;min-height:0}
+.side .box{padding:12px 14px;border-bottom:1px solid var(--line)}
+.focus{border-left:3px solid var(--gold);padding:6px 10px;background:var(--panel2);font-weight:bold;line-height:1.5}
+.issues{margin:8px 0 0;padding-left:18px;color:var(--muted);line-height:1.6}
+.issues b{color:var(--text)}
+.filters{display:flex;gap:6px;flex-wrap:wrap}
+.list{overflow:auto;flex:1;min-height:0}
+.row{display:grid;grid-template-columns:44px 22px 1fr;gap:6px;padding:7px 14px;cursor:pointer;border-bottom:1px solid #20262e;align-items:start}
+.row:hover{background:var(--panel2)}
+.row.sel{background:#262d36;box-shadow:inset 3px 0 0 var(--gold)}
+.row .tm{color:var(--muted);font-variant-numeric:tabular-nums}
+.row.s3 .tt{color:#ffb4b4}.row.s2 .tt{color:#ffd59a}.row.s0{opacity:.65}
+.row .ad{display:block;color:var(--muted);font-size:12px}
+
+/* minimap */
+.mapwrap{position:relative;aspect-ratio:1/1;background:#1a2a22;border-radius:6px;overflow:hidden}
+.mapwrap img.map{position:absolute;inset:0;width:100%;height:100%;opacity:.85}
+.stage .mapwrap{height:min(100%,100vh - 290px);max-height:100%;}
+.ch{position:absolute;width:30px;height:30px;margin:-15px 0 0 -15px;border-radius:50%;border:2px solid;background:#222 center/cover;
+  transition:left .12s linear,top .12s linear;font-size:10px;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.ch.b{border-color:var(--blue)}.ch.r{border-color:var(--red)}
+.ch.me{border-color:var(--gold);box-shadow:0 0 0 2px var(--gold),0 0 12px var(--gold);z-index:3}
+.ch.dead{filter:grayscale(1);opacity:.35}
+.ch .lb{position:absolute;bottom:-15px;left:50%;transform:translateX(-50%);white-space:nowrap;font-size:10px;
+  background:rgba(0,0,0,.7);padding:0 3px;border-radius:3px}
+.stage .ch{width:38px;height:38px;margin:-19px 0 0 -19px}
+.xmark{position:absolute;color:var(--red);font-size:22px;font-weight:bold;transform:translate(-50%,-50%);text-shadow:0 0 4px #000;z-index:4}
+.maptime{position:absolute;left:8px;top:6px;background:rgba(0,0,0,.6);padding:2px 8px;border-radius:4px;font-variant-numeric:tabular-nums}
+.empty{color:var(--muted);text-align:center;line-height:1.8}
+
+/* bottom */
+.bottom{border-top:1px solid var(--line);background:var(--panel)}
+.transport{display:flex;align-items:center;gap:8px;padding:8px 16px;flex-wrap:wrap}
+.transport .time{font-variant-numeric:tabular-nums;min-width:110px}
+.transport .sp{flex:1}
+.sync{display:flex;align-items:center;gap:6px;color:var(--muted);flex-wrap:wrap}
+.sync input{width:64px;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:4px 6px}
+.timeline{position:relative;margin:0 16px;height:118px;cursor:pointer;user-select:none}
+.tl-rows{position:absolute;left:0;right:0;top:0;height:72px}
+.tl-label{position:absolute;left:-2px;font-size:10px;color:var(--muted);pointer-events:none}
+.mk{position:absolute;transform:translateX(-50%);font-size:15px;line-height:1;padding:2px;border-radius:4px;cursor:pointer;
+  background:transparent;border:none}
+.mk:hover,.mk.sel{background:rgba(200,170,110,.35)}
+.mk.s3{filter:drop-shadow(0 0 3px var(--red))}
+.mk.enemy{filter:drop-shadow(0 0 3px var(--red)) saturate(.6)}
+.gold{position:absolute;left:0;right:0;top:72px;height:30px}
+.axis{position:absolute;left:0;right:0;top:102px;height:16px;color:var(--muted);font-size:11px}
+.axis span{position:absolute;transform:translateX(-50%)}
+.head{position:absolute;top:0;bottom:16px;width:2px;background:var(--gold);pointer-events:none;box-shadow:0 0 6px var(--gold)}
+.card{margin:8px 16px 14px;padding:12px 16px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;min-height:96px}
+.card .top{display:flex;align-items:center;gap:10px}
+.card .ic{font-size:22px}
+.card h2{font-size:16px;margin:0}
+.card .sub{color:var(--muted)}
+.card .facts{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.card .facts span{background:#11161b;border:1px solid var(--line);border-radius:12px;padding:2px 10px;font-size:12px;color:#c9cfd6}
+.card .adv{margin:4px 0 0;padding:0;list-style:none}
+.card .adv li{padding:4px 0 4px 26px;position:relative;line-height:1.5}
+.card .adv li::before{content:"💡";position:absolute;left:0}
+.card .nav{margin-left:auto;display:flex;gap:6px}
+.hint{color:var(--muted);font-size:12px}
+@media (max-width:900px){.main{grid-template-columns:1fr}.side{display:none}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <a href="index.html" class="brand">Ascend InQ</a>
+    <span id="badge" class="badge"></span>
+    <h1 id="title"></h1>
+    <span class="meta" id="meta"></span>
+    <span class="sp"></span>
+    <label><button id="openVideo">🎬 録画を開く</button><input type="file" id="file" accept="video/*" hidden></label>
+    <a id="reportLink" href="#">詳細レポート</a>
+    <a href="index.html">試合一覧</a>
+  </header>
+
+  <div class="main">
+    <div class="stage" id="stage"></div>
+    <aside class="side">
+      <div class="box" id="miniBox" hidden></div>
+      <div class="box">
+        <div class="hint">次の試合で意識すること</div>
+        <div class="focus" id="focus"></div>
+        <ol class="issues" id="issues"></ol>
+      </div>
+      <div class="box filters" id="filters"></div>
+      <div class="list" id="list"></div>
+    </aside>
+  </div>
+
+  <div class="bottom">
+    <div class="transport">
+      <button id="play">▶</button>
+      <span class="time" id="time">0:00 / 0:00</span>
+      <span id="speeds"></span>
+      <label class="hint"><input type="checkbox" id="autoPause"> 重要な場面で一時停止</label>
+      <span class="sp"></span>
+      <span class="sync" id="sync" hidden>
+        同期: ゲーム 0:00 = 動画 <b id="offv"></b>秒
+        <button data-d="-5">-5</button><button data-d="-1">-1</button><button data-d="1">+1</button><button data-d="5">+5</button>
+        ｜ 今の画面のゲーム内時計 <input id="clockIn" placeholder="12:34"><button id="clockSet">合わせる</button>
+      </span>
+    </div>
+    <div class="timeline" id="tl">
+      <div class="tl-rows" id="tlRows"></div>
+      <svg class="gold" id="gold" preserveAspectRatio="none"></svg>
+      <div class="axis" id="axis"></div>
+      <div class="head" id="head"></div>
+    </div>
+    <div class="card" id="card"></div>
+  </div>
+</div>
+
+<script>
+const D = /*__DATA__*/null;
+const $ = id => document.getElementById(id);
+const MAP = 14870;
+const fmt = s => { s = Math.max(0, Math.floor(s)); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); };
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+};
+
+let t = 0, playing = false, speed = 8, video = null, offset = D.offset || 0, selected = null, filter = "all";
+let lastTick = 0, lastT = 0;
+
+// ---------------- header / side
+$("badge").textContent = D.header.result;
+$("badge").className = "badge " + (D.header.win ? "win" : "lose");
+$("title").textContent = D.header.title;
+$("meta").textContent = D.header.kda + "　" + D.header.line;
+$("reportLink").href = D.matchId + ".html";
+$("focus").textContent = D.focus;
+$("issues").innerHTML = D.issues.map(i => `<li><b>${esc(i.title)}</b></li>`).join("");
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+
+const FILTERS = [["all", "すべて"], ["important", "重要"], ["death", "💀 デス"], ["objective", "🐉 オブジェクト"], ["kill", "⚔️ キル"]];
+$("filters").innerHTML = FILTERS.map(([k, l]) => `<button data-f="${k}">${l}</button>`).join("");
+$("filters").onclick = e => { const f = e.target.dataset.f; if (f) { filter = f; renderList(); } };
+const matchFilter = m => filter === "all" ? true : filter === "important" ? m.severity >= 2 : m.kind === filter;
+
+function renderList() {
+  [...$("filters").children].forEach(b => b.classList.toggle("on", b.dataset.f === filter));
+  $("list").innerHTML = D.moments.map((m, i) => matchFilter(m) ? `
+    <div class="row s${m.severity}${selected === i ? " sel" : ""}" data-i="${i}">
+      <span class="tm">${fmt(m.t)}</span><span>${m.icon}</span>
+      <span><span class="tt">${esc(m.title)}</span>${m.advice.length ? `<span class="ad">${esc(m.advice[0])}</span>` : ""}</span>
+    </div>` : "").join("");
+}
+$("list").onclick = e => { const r = e.target.closest(".row"); if (r) selectMoment(+r.dataset.i, true); };
+
+// ---------------- minimap
+function buildMap(container, big) {
+  container.innerHTML = "";
+  const wrap = document.createElement("div");
+  wrap.className = "mapwrap";
+  if (D.map) wrap.innerHTML = `<img class="map" src="${D.map}" alt="">`;
+  wrap.insertAdjacentHTML("beforeend", `<span class="maptime"></span>`);
+  const icons = {};
+  for (const p of D.players) {
+    const el = document.createElement("div");
+    el.className = "ch " + (p.team === 100 ? "b" : "r") + (p.pid === D.me ? " me" : "");
+    if (p.icon) el.style.backgroundImage = `url(${p.icon})`; else el.textContent = p.champ.slice(0, 2);
+    el.title = p.champ + (p.role ? `（${p.role}）` : "");
+    const enemyJg = p.team !== D.myTeam && p.role === "JG";
+    if (p.pid === D.me || enemyJg) el.insertAdjacentHTML("beforeend", `<span class="lb">${p.pid === D.me ? "自分" : "敵JG"}</span>`);
+    el.style.overflow = "visible";
+    wrap.appendChild(el);
+    icons[p.pid] = el;
+  }
+  const x = document.createElement("div");
+  x.className = "xmark"; x.textContent = "✕"; x.hidden = true;
+  wrap.appendChild(x);
+  container.appendChild(wrap);
+  return { wrap, icons, x, time: wrap.querySelector(".maptime") };
+}
+
+function posAt(pid, time) {
+  const tr = D.tracks[pid];
+  if (!tr || !tr.length) return null;
+  let lo = 0, hi = tr.length - 1;
+  if (time <= tr[0][0]) return tr[0];
+  if (time >= tr[hi][0]) return tr[hi];
+  while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (tr[mid][0] <= time) lo = mid; else hi = mid; }
+  const a = tr[lo], b = tr[hi], r = (time - a[0]) / ((b[0] - a[0]) || 1);
+  return [time, a[1] + (b[1] - a[1]) * r, a[2] + (b[2] - a[2]) * r];
+}
+const isDead = (pid, time) => (D.deathTimers[pid] || []).some(([dt, rs]) => time >= dt && time < dt + rs);
+
+let maps = [];
+function drawMaps() {
+  for (const m of maps) {
+    for (const p of D.players) {
+      const q = posAt(p.pid, t), el = m.icons[p.pid];
+      if (!q) continue;
+      el.style.left = (q[1] / MAP * 100) + "%";
+      el.style.top = ((1 - q[2] / MAP) * 100) + "%";
+      el.classList.toggle("dead", isDead(p.pid, t));
+    }
+    const d = D.moments.find(mo => mo.kind === "death" && t >= mo.t - 1 && t < mo.t + 8);
+    const myDeath = d && posAt(D.me, d.t);
+    m.x.hidden = !myDeath;
+    if (myDeath) { m.x.style.left = (myDeath[1] / MAP * 100) + "%"; m.x.style.top = ((1 - myDeath[2] / MAP) * 100) + "%"; }
+    m.time.textContent = fmt(t);
+  }
+}
+
+function setupStage() {
+  const stage = $("stage");
+  stage.innerHTML = "";
+  maps = [];
+  if (video) {
+    stage.appendChild(video);
+    $("miniBox").hidden = false;
+    maps.push(buildMap($("miniBox"), false));
+    $("sync").hidden = false;
+    $("speeds").hidden = true;
+  } else {
+    $("miniBox").hidden = true;
+    const holder = document.createElement("div");
+    holder.style.cssText = "height:100%;aspect-ratio:1/1;max-width:100%;padding:12px";
+    stage.appendChild(holder);
+    maps.push(buildMap(holder, true));
+    maps[0].wrap.style.height = "100%";
+    $("sync").hidden = true;
+    $("speeds").hidden = false;
+  }
+  drawMaps();
+}
+
+// ---------------- timeline
+const ROWS = [["自分", ["death", "kill"]], ["マップ", ["objective", "tower", "roam"]], ["その他", ["item", "lane"]]];
+function buildTimeline() {
+  const rows = $("tlRows");
+  rows.innerHTML = ROWS.map(([l], i) => `<span class="tl-label" style="top:${i * 24 + 4}px">${l}</span>`).join("");
+  D.moments.forEach((m, i) => {
+    const r = ROWS.findIndex(([, ks]) => ks.includes(m.kind));
+    const b = document.createElement("button");
+    b.className = "mk s" + m.severity + (m.ours === false ? " enemy" : "");
+    b.textContent = m.icon;
+    b.title = fmt(m.t) + " " + m.title;
+    b.style.left = (m.t / D.duration * 100) + "%";
+    b.style.top = (r * 24) + "px";
+    b.dataset.i = i;
+    b.onclick = e => { e.stopPropagation(); selectMoment(i, true); };
+    rows.appendChild(b);
+  });
+  // gold difference graph (my team's perspective)
+  const g = D.gold.map(([s, v]) => [s, D.myTeam === 100 ? v : -v]);
+  const max = Math.max(1000, ...g.map(([, v]) => Math.abs(v)));
+  const svg = $("gold");
+  svg.setAttribute("viewBox", `0 0 ${D.duration} 100`);
+  const y = v => 50 - v / max * 48;
+  const pts = g.map(([s, v]) => `${s},${y(v)}`).join(" ");
+  svg.innerHTML = `
+    <defs><clipPath id="up"><rect x="0" y="0" width="${D.duration}" height="50"/></clipPath>
+    <clipPath id="dn"><rect x="0" y="50" width="${D.duration}" height="50"/></clipPath></defs>
+    <polygon points="0,50 ${pts} ${g.at(-1)[0]},50" fill="rgba(79,163,255,.45)" clip-path="url(#up)"/>
+    <polygon points="0,50 ${pts} ${g.at(-1)[0]},50" fill="rgba(255,93,93,.45)" clip-path="url(#dn)"/>
+    <line x1="0" x2="${D.duration}" y1="50" y2="50" stroke="#3a434e" stroke-width="1" vector-effect="non-scaling-stroke"/>`;
+  svg.insertAdjacentHTML("afterend", "");
+  let ax = "";
+  for (let m = 0; m * 60 <= D.duration; m += 5) ax += `<span style="left:${m * 60 / D.duration * 100}%">${m}分</span>`;
+  $("axis").innerHTML = ax + `<span style="left:100%;transform:translateX(-100%)" title="チームのゴールド差">金差 ±${Math.round(max / 100) / 10}k</span>`;
+  $("tl").onclick = e => {
+    const r = $("tl").getBoundingClientRect();
+    seek((e.clientX - r.left) / r.width * D.duration);
+  };
+}
+
+// ---------------- commentary card
+function currentMoment() {
+  if (selected !== null) return selected;
+  let best = null;
+  D.moments.forEach((m, i) => { if (m.severity >= 1 && m.t <= t + 1 && t - m.t < 30) best = i; });
+  return best;
+}
+let shownCard = -2;
+function renderCard() {
+  const i = currentMoment();
+  if (i === shownCard) return;
+  shownCard = i;
+  document.querySelectorAll(".mk").forEach(b => b.classList.toggle("sel", +b.dataset.i === i));
+  if (i === null) {
+    $("card").innerHTML = `<div class="empty">シークバーのアイコンか右の一覧をクリックすると、その場面の解説が出ます。<br>
+      <span class="hint">Space 再生/停止 ・ ←→ 5秒移動 ・ N / P 次/前の重要場面</span></div>`;
+    return;
+  }
+  const m = D.moments[i];
+  $("card").innerHTML = `
+    <div class="top"><span class="ic">${m.icon}</span>
+      <div><h2>${fmt(m.t)}　${esc(m.title)}</h2>${m.sub ? `<div class="sub">${esc(m.sub)}</div>` : ""}</div>
+      <div class="nav"><button id="prevM">◀ 前</button><button id="replay">↺ ${fmt(m.jump)}から見る</button><button id="nextM">次 ▶</button></div>
+    </div>
+    ${m.facts.length ? `<div class="facts">${m.facts.map(f => `<span>${esc(f)}</span>`).join("")}</div>` : ""}
+    ${m.advice.length ? `<ul class="adv">${m.advice.map(a => `<li>${esc(a)}</li>`).join("")}</ul>` : ""}`;
+  $("prevM").onclick = () => step(-1);
+  $("nextM").onclick = () => step(1);
+  $("replay").onclick = () => selectMoment(i, true);
+}
+function selectMoment(i, jump) {
+  selected = i;
+  if (jump) seek(D.moments[i].jump, true);
+  renderList();
+  renderCard();
+  const row = document.querySelector(`.row[data-i="${i}"]`);
+  if (row) row.scrollIntoView({ block: "nearest" });
+}
+function step(dir) {
+  const imp = D.moments.map((m, i) => [m, i]).filter(([m]) => m.severity >= 2);
+  const cur = selected !== null ? D.moments[selected].t : t;
+  const nxt = dir > 0 ? imp.find(([m]) => m.t > cur + 0.5) : [...imp].reverse().find(([m]) => m.t < cur - 0.5);
+  if (nxt) selectMoment(nxt[1], true);
+}
+
+// ---------------- time control
+function seek(s, keepSel) {
+  t = Math.max(0, Math.min(D.duration, s));
+  if (!keepSel) selected = null;
+  lastT = t;
+  if (video) video.currentTime = Math.max(0, t + offset);
+  update();
+}
+function update() {
+  $("time").textContent = fmt(t) + " / " + fmt(D.duration);
+  $("head").style.left = (t / D.duration * 100) + "%";
+  $("play").textContent = playing ? "❚❚" : "▶";
+  drawMaps();
+  if (selected !== null && Math.abs(D.moments[selected].t - t) > 45) { selected = null; renderList(); }
+  renderCard();
+}
+function setPlaying(p) {
+  playing = p;
+  if (video) { p ? video.play() : video.pause(); }
+  lastTick = performance.now();
+  update();
+}
+function loop(now) {
+  if (playing) {
+    if (video) t = video.currentTime - offset;
+    else { t += (now - lastTick) / 1000 * speed; if (t >= D.duration) { t = D.duration; playing = false; } }
+    if ($("autoPause").checked) {
+      const hit = D.moments.findIndex(m => m.severity >= 3 && m.t > lastT && m.t <= t);
+      if (hit >= 0) { t = D.moments[hit].t; if (video) video.currentTime = t + offset; setPlaying(false); selectMoment(hit, false); }
+    }
+    lastT = t;
+    update();
+  }
+  lastTick = now;
+  requestAnimationFrame(loop);
+}
+$("play").onclick = () => setPlaying(!playing);
+$("speeds").innerHTML = [1, 4, 8, 16].map(s => `<button data-s="${s}">×${s}</button>`).join(" ");
+$("speeds").onclick = e => { if (e.target.dataset.s) { speed = +e.target.dataset.s; markSpeed(); } };
+const markSpeed = () => [...$("speeds").children].forEach(b => b.classList.toggle("on", +b.dataset.s === speed));
+markSpeed();
+document.addEventListener("keydown", e => {
+  if (e.target.tagName === "INPUT") return;
+  if (e.code === "Space") { e.preventDefault(); setPlaying(!playing); }
+  else if (e.key === "ArrowRight") seek(t + 5, true);
+  else if (e.key === "ArrowLeft") seek(t - 5, true);
+  else if (e.key === "n" || e.key === "N") step(1);
+  else if (e.key === "p" || e.key === "P") step(-1);
+});
+
+// ---------------- video & sync
+const OFF_KEY = "offset:" + D.matchId;
+function startFromName(name) {
+  let m = name.match(/(\d{4})-(\d{2})-(\d{2})[ _](\d{2})[-_.](\d{2})[-_.](\d{2})/);  // OBS
+  if (m) return new Date(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime() / 1000;
+  m = name.match(/(\d{2})-(\d{2})-(\d{4})_(\d{1,2})-(\d{1,2})-(\d{1,2})/);           // Outplayed
+  if (m) return new Date(+m[3], m[1] - 1, +m[2], +m[4], +m[5], +m[6]).getTime() / 1000;
+  return null;
+}
+function useVideo(src, name) {
+  video = document.createElement("video");
+  video.src = src;
+  video.controls = false;
+  video.preload = "auto";
+  video.onclick = () => setPlaying(!playing);
+  video.onerror = () => {
+    $("stage").innerHTML = `<div class="empty">録画ファイルを開けませんでした：${esc(name || "")}<br>「🎬 録画を開く」から選び直してください。</div>`;
+  };
+  const saved = store.get(OFF_KEY);
+  if (saved !== null) offset = +saved;
+  else if (D.offset == null || name !== D.videoName) {
+    const st = startFromName(name || "");
+    offset = st ? D.gameStartMs / 1000 - st : 0;
+  }
+  showOffset();
+  setupStage();
+  video.addEventListener("loadedmetadata", () => seek(t, true), { once: true });
+}
+function showOffset() { $("offv").textContent = offset.toFixed(1); }
+$("sync").onclick = e => {
+  const d = e.target.dataset.d;
+  if (!d) return;
+  offset += +d; store.set(OFF_KEY, offset); showOffset(); t = video.currentTime - offset; update();
+};
+$("clockSet").onclick = () => {
+  const m = $("clockIn").value.trim().match(/^(\d+):(\d{1,2})$/);
+  if (!m || !video) return;
+  offset = video.currentTime - (+m[1] * 60 + +m[2]);
+  store.set(OFF_KEY, offset); showOffset(); t = video.currentTime - offset; update();
+};
+$("openVideo").onclick = e => { e.preventDefault(); $("file").click(); };
+$("file").onchange = e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  store.set(OFF_KEY, "");
+  try { localStorage.removeItem(OFF_KEY); } catch (err) {}
+  useVideo(URL.createObjectURL(f), f.name);
+};
+
+// ---------------- start
+buildTimeline();
+renderList();
+if (D.video) useVideo(D.video, D.videoName); else setupStage();
+const firstDeath = D.moments.findIndex(m => m.kind === "death");
+update();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

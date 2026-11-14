@@ -1,0 +1,11 @@
+.env
+data/
+clips/
+reports/
+__pycache__/
+*.mp4
+*.mkv
+recordings/
+CLAUDE.local.md
+.claude/
+*.part.mp4
